@@ -4,21 +4,15 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\core\Controller;
 
-use Exception;
-use SAML2\Binding;
-use SAML2\Constants;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
-use SimpleSAML\IdP;
-use SimpleSAML\Logger;
+use Exception as BuiltinException;
+use SimpleSAML\{Auth, Configuration, Error, IdP, Logger, Stats, Utils};
 use SimpleSAML\Metadata\MetaDataStorageHandler;
 use SimpleSAML\Module\saml\Message;
-use SimpleSAML\Stats;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Binding;
+use SimpleSAML\SAML2\Constants as C;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Bridge\PsrHttpMessage\Factory\HttpFoundationFactory;
+use Symfony\Component\HttpFoundation\{Request, Response};
 
 use function call_user_func;
 use function in_array;
@@ -38,9 +32,6 @@ use function var_export;
  */
 class Logout
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /**
      * @var \SimpleSAML\Auth\State|string
      * @psalm-var \SimpleSAML\Auth\State|class-string
@@ -56,9 +47,8 @@ class Logout
      * @param \SimpleSAML\Configuration $config The configuration to use by the controllers.
      */
     public function __construct(
-        Configuration $config
+        protected Configuration $config
     ) {
-        $this->config = $config;
     }
 
 
@@ -79,18 +69,15 @@ class Logout
      * @param Request $request The request that lead to this logout operation.
      * @param string $as The name of the auth source.
      *
-     * @return \SimpleSAML\HTTP\RunnableResponse A runnable response which will actually perform logout.
+     * @return \Symfony\Component\HttpFoundation\Response
      *
      * @throws \SimpleSAML\Error\CriticalConfigurationError
      */
-    public function logout(Request $request, string $as): RunnableResponse
+    public function logout(Request $request, string $as): Response
     {
         $auth = new Auth\Simple($as);
         $returnTo = $this->getReturnPath($request);
-        return new RunnableResponse(
-            [$auth, 'logout'],
-            [$returnTo]
-        );
+        return $auth->logout($returnTo);
     }
 
 
@@ -117,9 +104,9 @@ class Logout
 
     /**
      * @param Request $request The request that lead to this logout operation.
-     * @return \SimpleSAML\HTTP\RunnableResponse
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function logoutIframeDone(Request $request): RunnableResponse
+    public function logoutIframeDone(Request $request): Response
     {
         if (!$request->query->has('id')) {
             throw new Error\BadRequest('Missing required parameter: id');
@@ -127,7 +114,7 @@ class Logout
         $id = $request->query->get('id');
 
         $state = $this->authState::loadState($id, 'core:Logout-IFrame');
-        $idp = IdP::getByState($state);
+        $idp = IdP::getByState($this->config, $state);
 
         $associations = $idp->getAssociations();
 
@@ -178,21 +165,21 @@ class Logout
         }
 
         // we are done
-        return new RunnableResponse([$idp, 'finishLogout'], [$state]);
+        return $idp->finishLogout($state);
     }
 
 
     /**
-     * @param Request $request The request that lead to this logout operation.
-     * @return \SimpleSAML\HTTP\RunnableResponse
+     * @param \Symfony\Component\HttpFoundation\Request $request The request that lead to this logout operation.
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function logoutIframePost(Request $request): RunnableResponse
+    public function logoutIframePost(Request $request): Response
     {
         if (!$request->query->has('idp')) {
             throw new Error\BadRequest('Missing required parameter: idp');
         }
 
-        $idp = IdP::getById($request->query->get('idp'));
+        $idp = IdP::getById($this->config, $request->query->get('idp'));
 
         if (!$request->query->has('association')) {
             throw new Error\BadRequest('Missing required parameter: association');
@@ -210,7 +197,7 @@ class Logout
         }
         $association = $associations[$assocId];
 
-        $metadata = MetaDataStorageHandler::getMetadataHandler();
+        $metadata = MetaDataStorageHandler::getMetadataHandler($this->config);
         $idpMetadata = $idp->getConfig();
         $spMetadata = $metadata->getMetaDataConfig($association['saml:entityID'], 'saml20-sp-remote');
 
@@ -237,14 +224,16 @@ class Logout
             'idpEntityID' => $idpMetadata->getString('entityid'),
         ]);
 
-        $bindings = [Constants::BINDING_HTTP_POST];
+        $bindings = [C::BINDING_HTTP_POST];
 
         $dst = $spMetadata->getDefaultEndpoint('SingleLogoutService', $bindings);
         $binding = Binding::getBinding($dst['Binding']);
         $lr->setDestination($dst['Location']);
         $lr->setRelayState($relayState);
 
-        return new RunnableResponse([$binding, 'send'], [$lr]);
+        $psrResponse = $binding->send($lr);
+        $httpFoundationFactory = new HttpFoundationFactory();
+        return $httpFoundationFactory->createResponse($psrResponse);
     }
 
 
@@ -273,8 +262,8 @@ class Logout
         }
 
         $state = $this->authState::loadState($id, 'core:Logout-IFrame');
-        $idp = IdP::getByState($state);
-        $mdh = MetaDataStorageHandler::getMetadataHandler();
+        $idp = IdP::getByState($this->config, $state);
+        $mdh = MetaDataStorageHandler::getMetadataHandler($this->config);
 
         if ($type !== 'init') {
             // update association state
@@ -308,7 +297,7 @@ class Logout
 
                 if (!isset($sp['core:Logout-IFrame:Timeout'])) {
                     if (method_exists($sp['Handler'], 'getAssociationConfig')) {
-                        $assocIdP = IdP::getByState($sp);
+                        $assocIdP = IdP::getByState($this->config, $sp);
                         $assocConfig = call_user_func([$sp['Handler'], 'getAssociationConfig'], $assocIdP, $sp);
                         $timeout = $assocConfig->getOptionalInteger('core:logout-timeout', 5);
                         $sp['core:Logout-IFrame:Timeout'] = $timeout + time();
@@ -327,10 +316,10 @@ class Logout
             }
 
             try {
-                $assocIdP = IdP::getByState($sp);
+                $assocIdP = IdP::getByState($this->config, $sp);
                 $url = call_user_func([$sp['Handler'], 'getLogoutURL'], $assocIdP, $sp, null);
                 $sp['core:Logout-IFrame:URL'] = $url;
-            } catch (Exception $e) {
+            } catch (BuiltinException $e) {
                 $sp['core:Logout-IFrame:State'] = 'failed';
             }
         }
@@ -396,9 +385,8 @@ class Logout
 
     /**
      * @param Request $request The request that lead to this logout operation.
-     * @return \SimpleSAML\HTTP\RunnableResponse
      */
-    public function resumeLogout(Request $request): RunnableResponse
+    public function resumeLogout(Request $request): Response
     {
         if (!$request->query->has('id')) {
             throw new Error\BadRequest('Missing required parameter: id');
@@ -406,9 +394,10 @@ class Logout
         $id = $request->query->get('id');
 
         $state = $this->authState::loadState($id, 'core:Logout:afterbridge');
-        $idp = IdP::getByState($state);
+        $idp = IdP::getByState($this->config, $state);
 
         $assocId = $state['core:TerminatedAssocId'];
-        return new RunnableResponse([$idp->getLogoutHandler(), 'startLogout'], [&$state, $assocId]);
+        $logoutHandler = $idp->getLogoutHandler();
+        return $logoutHandler->startLogout($state, $assocId);
     }
 }

@@ -13,15 +13,25 @@ namespace SimpleSAML\Utils;
 use DOMComment;
 use DOMDocument;
 use DOMElement;
+use DOMException;
 use DOMNode;
 use DOMText;
-use SAML2\Constants as C;
-use SAML2\DOMDocumentFactory;
+use Exception;
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Logger;
-use SimpleSAML\XML\Errors;
+use SimpleSAML\{Configuration, Error, Logger};
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\XML\{DOMDocumentFactory, Errors};
+
+use function array_key_exists;
+use function count;
+use function explode;
+use function filter_var;
+use function in_array;
+use function is_string;
+use function libxml_set_external_entity_loader;
+use function strlen;
+use function strpos;
+use function trim;
 
 class XML
 {
@@ -56,10 +66,8 @@ class XML
         $debug = Configuration::getInstance()->getOptionalArray('debug', ['validatexml' => false]);
 
         if (
-            !(
-                in_array('validatexml', $debug, true)
-                || (array_key_exists('validatexml', $debug) && ($debug['validatexml'] === true))
-            )
+            !in_array('validatexml', $debug, true) // implicitly enabled
+            && !(array_key_exists('validatexml', $debug) && ($debug['validatexml'] === true)) // explicitly enabled
         ) {
             // XML validation is disabled
             return;
@@ -94,20 +102,14 @@ class XML
      *
      *
      */
-    public function debugSAMLMessage($message, string $type): void
+    public function debugSAMLMessage(string|DOMElement $message, string $type): void
     {
-        if (!(is_string($message) || $message instanceof DOMElement)) {
-            throw new \InvalidArgumentException('Invalid input parameters.');
-        }
-
         // see if debugging is enabled for SAML messages
         $debug = Configuration::getInstance()->getOptionalArray('debug', ['saml' => false]);
 
         if (
-            !(
-                in_array('saml', $debug, true) || // implicitly enabled
-                (array_key_exists('saml', $debug) && $debug['saml'] === true) // explicitly enabled
-            )
+            !(in_array('saml', $debug, true) || // implicitly enabled
+            (array_key_exists('saml', $debug) && $debug['saml'] === true)) // explicitly enabled
         ) {
             // debugging messages is disabled
             return;
@@ -131,7 +133,7 @@ class XML
                 Logger::debug('Encrypted message:');
                 break;
             default:
-                Assert::true(false);
+                throw new Exception(sprintf('Unknown message type;  %s', $type));
         }
 
         $str = $this->formatXMLString($message);
@@ -216,7 +218,7 @@ class XML
             $root->insertBefore(new DOMText("\n" . $childIndentation), $node);
 
             // format child elements
-            if ($node instanceof \DOMElement) {
+            if ($node instanceof DOMElement) {
                 $this->formatDOMElement($node, $childIndentation);
             }
         }
@@ -244,8 +246,8 @@ class XML
     {
         try {
             $doc = DOMDocumentFactory::fromString($xml);
-        } catch (\Exception $e) {
-            throw new \DOMException('Error parsing XML string.');
+        } catch (Exception $e) {
+            throw new DOMException('Error parsing XML string.');
         }
 
         $root = $doc->firstChild;
@@ -323,12 +325,8 @@ class XML
      * @throws \InvalidArgumentException If $schema is not a string, or $xml is neither a string nor a \DOMDocument.
      *
      */
-    public function isValid($xml, string $schema)
+    public function isValid(string|DOMDocument $xml, string $schema)
     {
-        if (!is_string($xml) && !($xml instanceof DOMDocument)) {
-            throw new \InvalidArgumentException('Invalid input parameters.');
-        }
-
         Errors::begin();
 
         if ($xml instanceof DOMDocument) {
@@ -338,7 +336,7 @@ class XML
             try {
                 $dom = DOMDocumentFactory::fromString($xml);
                 $res = true;
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 $res = false;
             }
         }
@@ -346,7 +344,7 @@ class XML
         if ($res === true) {
             $config = Configuration::getInstance();
             /** @var string $schemaPath */
-            $schemaPath = $config->resolvePath('vendor/simplesamlphp/saml2/schemas');
+            $schemaPath = $config->resolvePath('vendor/simplesamlphp/saml2/resources/schemas');
             $schemaFile = $schemaPath . '/' . $schema;
 
             libxml_set_external_entity_loader(
@@ -378,7 +376,6 @@ class XML
 
         $errors = Errors::end();
         $errorText .= Errors::formatErrors($errors);
-
         return $errorText;
     }
 }

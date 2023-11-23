@@ -6,24 +6,21 @@ namespace SimpleSAML\Metadata\Sources;
 
 use Exception;
 use RobRichards\XMLSecLibs\XMLSecurityDSig;
+use SimpleSAML\{Configuration, Error, Logger, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Logger;
 use SimpleSAML\Metadata\MetaDataStorageSource;
 use SimpleSAML\Metadata\SAMLParser;
-use SimpleSAML\Utils;
 use Symfony\Component\HttpFoundation\File\File;
 
 use function array_key_exists;
 use function error_get_last;
 use function is_array;
-use function serialize;
+use function json_decode;
+use function json_encode;
 use function sha1;
 use function sprintf;
 use function strval;
 use function time;
-use function unserialize;
 use function urlencode;
 
 /**
@@ -75,11 +72,12 @@ class MDQ extends MetaDataStorageSource
      * - 'cachedir':            Directory where metadata can be cached. Optional.
      * - 'cachelength':         Maximum time metadata cah be cached, in seconds. Default to 24 hours (86400 seconds).
      *
+     * @param \SimpleSAML\Configuration $globalConfig The global configuration
      * @param array $config The configuration for this instance of the XML metadata source.
      *
      * @throws \Exception If no server option can be found in the configuration.
      */
-    protected function __construct(array $config)
+    protected function __construct(Configuration $globalConfig, array $config)
     {
         parent::__construct();
 
@@ -94,7 +92,6 @@ class MDQ extends MetaDataStorageSource
         }
 
         if (array_key_exists('cachedir', $config)) {
-            $globalConfig = Configuration::getInstance();
             $this->cacheDir = $globalConfig->resolvePath($config['cachedir']);
         }
 
@@ -188,7 +185,7 @@ class MDQ extends MetaDataStorageSource
             ));
         }
 
-        $data = unserialize($rawData);
+        $data = json_decode($rawData);
         if ($data === false) {
             throw new Exception(
                 sprintf('%s: error unserializing cached data from file "%s".', __CLASS__, strval($file))
@@ -223,7 +220,7 @@ class MDQ extends MetaDataStorageSource
         Logger::debug(sprintf('%s: Writing cache [%s] => [%s]', __CLASS__, $entityId, $cacheFileName));
 
         /** @psalm-suppress TooManyArguments */
-        $this->fileSystem->appendToFile($cacheFileName, serialize($data), true);
+        $this->fileSystem->appendToFile($cacheFileName, json_encode($data), true);
     }
 
 
@@ -285,9 +282,9 @@ class MDQ extends MetaDataStorageSource
         }
 
         if (isset($data)) {
-            if (array_key_exists('expires', $data) && $data['expires'] < time()) {
+            if (array_key_exists('expire', $data) && $data['expire'] < time()) {
                 // metadata has expired
-                $data = null;
+                unset($data);
             } else {
                 // metadata found in cache and not expired
                 Logger::debug(sprintf('%s: using cached metadata for: %s.', __CLASS__, $entityId));
@@ -300,8 +297,13 @@ class MDQ extends MetaDataStorageSource
 
         Logger::debug(sprintf('%s: downloading metadata for "%s" from [%s]', __CLASS__, $entityId, $mdq_url));
         $httpUtils = new Utils\HTTP();
+        $context = [
+            'http' => [
+                'header' => 'Accept: application/samlmetadata+xml'
+            ]
+        ];
         try {
-            $xmldata = $httpUtils->fetch($mdq_url);
+            $xmldata = $httpUtils->fetch($mdq_url, $context);
         } catch (Exception $e) {
             // Avoid propagating the exception, make sure we can handle the error later
             $xmldata = false;

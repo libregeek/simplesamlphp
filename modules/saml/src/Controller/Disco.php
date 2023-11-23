@@ -5,9 +5,8 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\saml\Controller;
 
 use SimpleSAML\Configuration;
-use SimpleSAML\HTTP\RunnableResponse;
 use SimpleSAML\XHTML\IdPDisco;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\{Request, Response};
 
 /**
  * Controller class for the saml module.
@@ -18,10 +17,6 @@ use Symfony\Component\HttpFoundation\Request;
  */
 class Disco
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
-
     /**
      * Controller constructor.
      *
@@ -30,20 +25,19 @@ class Disco
      * @param \SimpleSAML\Configuration $config The configuration to use by the controllers.
      */
     public function __construct(
-        Configuration $config
+        protected Configuration $config
     ) {
-        $this->config = $config;
     }
 
 
     /**
      * Built-in IdP discovery service
      *
-     * @return \SimpleSAML\HTTP\RunnableResponse
+     * @param \Symfony\Component\HttpFoundation\Request $request
      */
-    public function disco(): RunnableResponse
+    public function disco(Request $request): Response
     {
-        $disco = new IdPDisco(['saml20-idp-remote'], 'saml');
-        return new RunnableResponse([$disco, 'handleRequest']);
+        $disco = new IdPDisco($request, ['saml20-idp-remote'], 'saml');
+        return $disco->handleRequest();
     }
 }

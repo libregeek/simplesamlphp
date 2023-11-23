@@ -6,10 +6,10 @@ namespace SimpleSAML\Test\Module\core\Auth\Source;
 
 use PHPUnit\Framework\TestCase;
 use SimpleSAML\Assert\AssertionFailedException;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
+use SimpleSAML\{Auth, Configuration};
 use SimpleSAML\Error\Exception;
 use SimpleSAML\Module\core\Auth\Source\SourceIPSelector;
+use Symfony\Component\HttpFoundation\{Request, Response};
 
 /**
  * @covers \SimpleSAML\Module\core\Auth\Source\AbstractSourceSelector
@@ -110,27 +110,31 @@ class SourceIPSelectorTest extends TestCase
 
         $selector = new class ($info, $config) extends SourceIPSelector {
             /**
+             * @param \Symfony\Component\HttpFoundation\Request $request
              * @param \SimpleSAML\Auth\Source $as
              * @param array $state
-             * @return void
+             * @return \Symfony\Component\HttpFoundation\Response|null
              */
-            public static function doAuthentication(Auth\Source $as, array $state): void
+            public static function doAuthentication(Request $request, Auth\Source $as, array $state): ?Response
             {
                 // Dummy
+                return null;
             }
 
             /**
+             * @param \Symfony\Component\HttpFoundation\Request $request
              * @param array &$state
-             * @return void
              */
-            public function authenticate(array &$state): void
+            public function authenticate(Request $request, array &$state): ?Response
             {
                 $state['finished'] = true;
+                return null;
             }
         };
 
         $state = [];
-        $selector->authenticate($state);
+        $request = Request::createFromGlobals();
+        $selector->authenticate($request, $state);
         $this->assertTrue($state['finished']);
     }
 
@@ -226,7 +230,7 @@ class SourceIPSelectorTest extends TestCase
     /**
      * @return array
      */
-    public function provideClientIP(): array
+    public static function provideClientIP(): array
     {
         return [
             ['127.0.0.2', 'external'],

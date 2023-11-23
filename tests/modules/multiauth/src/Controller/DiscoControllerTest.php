@@ -5,17 +5,12 @@ declare(strict_types=1);
 namespace SimpleSAML\Test\Module\multiauth\Controller;
 
 use PHPUnit\Framework\TestCase;
-use SimpleSAML\Auth\Source;
-use SimpleSAML\Auth\State;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
+use SimpleSAML\{Configuration, Error, Session};
+use SimpleSAML\Auth\{Source, State};
 use SimpleSAML\Module\multiauth\Auth\Source\MultiAuth;
 use SimpleSAML\Module\multiauth\Controller;
-use SimpleSAML\Session;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{RedirectResponse, Request, Response};
 
 /**
  * Set of tests for the controllers in the "multiauth" module.
@@ -29,6 +24,9 @@ class DiscoControllerTest extends TestCase
 
     /** @var \SimpleSAML\Session */
     protected Session $session;
+
+    /** @var \SimpleSAML\Auth\Source */
+    protected Source $authSource;
 
 
     /**
@@ -68,6 +66,18 @@ class DiscoControllerTest extends TestCase
             'authsources.php',
             'simplesaml'
         );
+
+        $this->authSource = new class () extends MultiAuth {
+            public function __construct()
+            {
+                // stub
+            }
+
+            public static function getById(string $authId, ?string $type = null): ?Source
+            {
+                return new static();
+            }
+        };
     }
 
 
@@ -121,22 +131,7 @@ class DiscoControllerTest extends TestCase
             }
         });
 
-        $c->setAuthSource(new class () extends MultiAuth {
-            public function __construct()
-            {
-                // stub
-            }
-
-            public function authenticate(array &$state): void
-            {
-                // stub
-            }
-
-            public static function getById(string $authId, ?string $type = null): ?Source
-            {
-                return new static();
-            }
-        });
+        $c->setAuthSource($this->authSource);
 
         $response = $c->discovery($request);
 
@@ -175,22 +170,7 @@ class DiscoControllerTest extends TestCase
             }
         });
 
-        $c->setAuthSource(new class () extends MultiAuth {
-            public function __construct()
-            {
-                // stub
-            }
-
-            public function authenticate(array &$state): void
-            {
-                // stub
-            }
-
-            public static function getById(string $authId, ?string $type = null): ?Source
-            {
-                return new static();
-            }
-        });
+        $c->setAuthSource($this->authSource);
 
         $response = $c->discovery($request);
 
@@ -200,7 +180,7 @@ class DiscoControllerTest extends TestCase
 
 
     /**
-     * Test that a valid requests results in a RunnableResponse
+     * Test that a valid requests results in a RedirectResponse
      * @return void
      */
     public function testDiscoveryDelegateAuth1(): void
@@ -231,32 +211,17 @@ class DiscoControllerTest extends TestCase
             }
         });
 
-        $c->setAuthSource(new class () extends MultiAuth {
-            public function __construct()
-            {
-                // stub
-            }
-
-            public function authenticate(array &$state): void
-            {
-                // stub
-            }
-
-            public static function getById(string $authId, ?string $type = null): ?Source
-            {
-                return new static();
-            }
-        });
+        $c->setAuthSource($this->authSource);
 
         $response = $c->discovery($request);
 
-        $this->assertInstanceOf(RunnableResponse::class, $response);
-        $this->assertTrue($response->isSuccessful());
+        $this->assertInstanceOf(RedirectResponse::class, $response);
+        $this->assertTrue($response->isRedirection());
     }
 
 
     /**
-     * Test that a valid request results in a RunnableResponse
+     * Test that a valid request results in a RedirectResponse
      * @return void
      */
     public function testDiscoveryDelegateAuth1WithPreviousSource(): void
@@ -287,32 +252,17 @@ class DiscoControllerTest extends TestCase
             }
         });
 
-        $c->setAuthSource(new class () extends MultiAuth {
-            public function __construct()
-            {
-                // stub
-            }
-
-            public function authenticate(array &$state): void
-            {
-                // stub
-            }
-
-            public static function getById(string $authId, ?string $type = null): ?Source
-            {
-                return new static();
-            }
-        });
+        $c->setAuthSource($this->authSource);
 
         $response = $c->discovery($request);
 
-        $this->assertInstanceOf(RunnableResponse::class, $response);
-        $this->assertTrue($response->isSuccessful());
+        $this->assertInstanceOf(RedirectResponse::class, $response);
+        $this->assertTrue($response->isRedirection());
     }
 
 
     /**
-     * Test that a valid request results in a RunnableResponse
+     * Test that a valid request results in a RedirectResponse
      * @return void
      */
     public function testDiscoveryDelegateAuth2(): void
@@ -341,26 +291,11 @@ class DiscoControllerTest extends TestCase
             }
         });
 
-        $c->setAuthSource(new class () extends MultiAuth {
-            public function __construct()
-            {
-                // stub
-            }
-
-            public function authenticate(array &$state): void
-            {
-                // stub
-            }
-
-            public static function getById(string $authId, ?string $type = null): ?Source
-            {
-                return new static();
-            }
-        });
+        $c->setAuthSource($this->authSource);
 
         $response = $c->discovery($request);
 
-        $this->assertInstanceOf(Response::class, $response);
+        $this->assertInstanceOf(Template::class, $response);
         $this->assertTrue($response->isSuccessful());
     }
 }

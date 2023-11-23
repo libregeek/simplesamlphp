@@ -4,19 +4,16 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\admin\Controller;
 
-use SAML2\Constants;
-use SAML2\XML\saml\NameID;
+use SimpleSAML\{Auth, Configuration, Module, Session, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\HTTP\RunnableResponse;
 use SimpleSAML\Locale\Translate;
-use SimpleSAML\Module;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\XML\saml\NameID;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{Request, Response};
+
+use function is_null;
+use function time;
+use function urlencode;
 
 /**
  * Controller class for the admin module.
@@ -27,9 +24,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class Test
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /**
      * @var \SimpleSAML\Utils\Auth
      */
@@ -50,9 +44,6 @@ class Test
     /** @var \SimpleSAML\Module\admin\Controller\Menu */
     protected Menu $menu;
 
-    /** @var \SimpleSAML\Session */
-    protected Session $session;
-
 
     /**
      * TestController constructor.
@@ -60,10 +51,10 @@ class Test
      * @param \SimpleSAML\Configuration $config The configuration to use.
      * @param \SimpleSAML\Session $session The current user session.
      */
-    public function __construct(Configuration $config, Session $session)
-    {
-        $this->config = $config;
-        $this->session = $session;
+    public function __construct(
+        protected Configuration $config,
+        protected Session $session
+    ) {
         $this->menu = new Menu();
         $this->authUtils = new Utils\Auth();
     }
@@ -107,11 +98,15 @@ class Test
      *
      * @param \Symfony\Component\HttpFoundation\Request $request
      * @param string|null $as
-     * @return \SimpleSAML\XHTML\Template|\SimpleSAML\HTTP\RunnableResponse
+     * @return \Symfony\Component\HttpFoundation\Response
      */
     public function main(Request $request, string $as = null): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
+
         if (is_null($as)) {
             $t = new Template($this->config, 'admin:authsource_list.twig');
             $t->data = [
@@ -122,7 +117,7 @@ class Test
             $authsource = new $this->authSimple($as);
 
             if (!is_null($request->query->get('logout'))) {
-                return new RunnableResponse([$authsource, 'logout'], [Module::getModuleURL('admin/logout')]);
+                return $authsource->logout(Module::getModuleURL('admin/logout'));
             } elseif (!is_null($request->query->get(Auth\State::EXCEPTION_PARAM))) {
                 // This is just a simple example of an error
                 /** @var array $state */
@@ -138,12 +133,13 @@ class Test
                     'ReturnTo' => $url,
                     Auth\State::RESTART => $url,
                 ];
-                return new RunnableResponse([$authsource, 'login'], [$params]);
+                return $authsource->login($params);
             }
 
             $attributes = $authsource->getAttributes();
             $authData = $authsource->getAuthDataArray();
             $nameId = $authsource->getAuthData('saml:sp:NameID') ?? false;
+            $nameId = $nameId ? $nameId->toArray() : $nameId;
 
             $httpUtils = new Utils\HTTP();
             $t = new Template($this->config, 'admin:status.twig');
@@ -169,7 +165,7 @@ class Test
      * @param \Symfony\Component\HttpFoundation\Request $request
      * @return \SimpleSAML\XHTML\Template
      */
-    public function logout(Request $request): Template
+    public function logout(/** @scrutinizer ignore-unused */Request $request): Template
     {
         return new Template($this->config, 'admin:logout.twig');
     }

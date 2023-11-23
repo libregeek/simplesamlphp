@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\exampleauth\Auth\Process;
 
+use SimpleSAML\{Auth, Module, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Module;
-use SimpleSAML\Utils;
 
 /**
  * A simple processing filter for testing that redirection works as it should.
@@ -32,6 +30,7 @@ class RedirectTest extends Auth\ProcessingFilter
         $url = Module::getModuleURL('exampleauth/redirecttest');
 
         $httpUtils = new Utils\HTTP();
-        $httpUtils->redirectTrustedURL($url, ['StateId' => $id]);
+        $response = $httpUtils->redirectTrustedURL($url, ['StateId' => $id]);
+        $response->send();
     }
 }

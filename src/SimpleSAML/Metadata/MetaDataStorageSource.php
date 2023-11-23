@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Metadata;
 
+use Exception;
+use SimpleSAML\{Configuration, Error, Module, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Error;
-use SimpleSAML\Module;
-use SimpleSAML\Utils;
 use Symfony\Component\Filesystem\Filesystem;
+
+use function array_flip;
+use function array_intersect_key;
+use function array_key_exists;
+use function array_merge;
+use function is_array;
 
 /**
  * This abstract class defines an interface for metadata storage sources.
@@ -55,7 +60,7 @@ abstract class MetaDataStorageSource
 
         foreach ($sourcesConfig as $sourceConfig) {
             if (!is_array($sourceConfig)) {
-                throw new \Exception("Found an element in metadata source configuration which wasn't an array.");
+                throw new Exception("Found an element in metadata source configuration which wasn't an array.");
             }
 
             $sources[] = self::getSource($sourceConfig);
@@ -84,18 +89,19 @@ abstract class MetaDataStorageSource
             $type = 'flatfile';
         }
 
+        $config = Configuration::getInstance();
         switch ($type) {
             case 'flatfile':
-                return new MetaDataStorageHandlerFlatFile($sourceConfig);
+                return new MetaDataStorageHandlerFlatFile($config, $sourceConfig);
             case 'xml':
-                return new MetaDataStorageHandlerXML($sourceConfig);
+                return new MetaDataStorageHandlerXML($config, $sourceConfig);
             case 'serialize':
-                return new MetaDataStorageHandlerSerialize($sourceConfig);
+                return new MetaDataStorageHandlerSerialize($config, $sourceConfig);
             case 'mdx':
             case 'mdq':
-                return new Sources\MDQ($sourceConfig);
+                return new Sources\MDQ($config, $sourceConfig);
             case 'pdo':
-                return new MetaDataStorageHandlerPdo($sourceConfig);
+                return new MetaDataStorageHandlerPdo($config, $sourceConfig);
             default:
                 // metadata store from module
                 try {
@@ -104,7 +110,7 @@ abstract class MetaDataStorageSource
                         'MetadataStore',
                         '\SimpleSAML\Metadata\MetaDataStorageSource'
                     );
-                } catch (\Exception $e) {
+                } catch (Exception $e) {
                     throw new Error\CriticalConfigurationError(
                         "Invalid 'type' for metadata source. Cannot find store '$type'.",
                         null
@@ -112,7 +118,7 @@ abstract class MetaDataStorageSource
                 }
 
                 /** @var \SimpleSAML\Metadata\MetaDataStorageSource */
-                return new $className($sourceConfig);
+                return new $className($config, $sourceConfig);
         }
     }
 
@@ -302,7 +308,7 @@ abstract class MetaDataStorageSource
      * @param array $metadataSet the already loaded metadata set
      * @return mixed|null
      */
-    protected function lookupIndexFromEntityId(string $entityId, array $metadataSet)
+    protected function lookupIndexFromEntityId(string $entityId, array $metadataSet): mixed
     {
         // check for hostname
         $httpUtils = new Utils\HTTP();
@@ -322,28 +328,5 @@ abstract class MetaDataStorageSource
         }
 
         return null;
-    }
-
-
-    /**
-     * @param string $set
-     * @throws \Exception
-     * @return string
-     */
-    private function getDynamicHostedUrl(string $set): string
-    {
-        // get the configuration
-        $httpUtils = new Utils\HTTP();
-        $baseUrl = $httpUtils->getBaseURL();
-
-        if ($set === 'saml20-idp-hosted') {
-            return $baseUrl . 'saml2/idp/metadata.php';
-        } elseif ($set === 'saml20-sp-hosted') {
-            return $baseUrl . 'saml2/sp/metadata.php';
-        } elseif ($set === 'adfs-idp-hosted') {
-            return 'urn:federation:' . $httpUtils->getSelfHost() . ':idp';
-        } else {
-            throw new \Exception('Can not generate dynamic EntityID for metadata of this type: [' . $set . ']');
-        }
     }
 }

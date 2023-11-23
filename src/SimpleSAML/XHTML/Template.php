@@ -12,27 +12,18 @@ namespace SimpleSAML\XHTML;
 
 use Exception;
 use InvalidArgumentException;
+use SimpleSAML\{Configuration, Error, Logger, Module, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Locale\Language;
-use SimpleSAML\Locale\Localization;
-use SimpleSAML\Locale\Translate;
-use SimpleSAML\Locale\TwigTranslator;
-use SimpleSAML\Logger;
-use SimpleSAML\Module;
-use SimpleSAML\Utils;
+use SimpleSAML\Locale\{Language, Localization, Translate, TwigTranslator};
 use Symfony\Bridge\Twig\Extension\TranslationExtension;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Symfony\Component\HttpFoundation\File\File;
 use Symfony\Component\HttpFoundation\Response;
-use Twig\Environment;
+use Twig\{Environment, TwigFilter, TwigFunction};
 use Twig\Error\RuntimeError;
 use Twig\Extra\Intl\IntlExtension;
 use Twig\Loader\FilesystemLoader;
-use Twig\TwigFilter;
-use Twig\TwigFunction;
 
 use function class_exists;
 use function count;
@@ -76,25 +67,11 @@ class Template extends Response
     private Localization $localization;
 
     /**
-     * The configuration to use in this template.
-     *
-     * @var \SimpleSAML\Configuration
-     */
-    private Configuration $configuration;
-
-    /**
-     * The file to load in this template.
-     *
-     * @var string
-     */
-    private string $template = 'default.php';
-
-    /**
      * The twig environment.
      *
      * @var \Twig\Environment
      */
-    private \Twig\Environment $twig;
+    private Environment $twig;
 
     /**
      * The template name.
@@ -144,12 +121,12 @@ class Template extends Response
      * @param \SimpleSAML\Configuration $configuration Configuration object
      * @param string                   $template Which template file to load
      */
-    public function __construct(Configuration $configuration, string $template)
-    {
-        $this->configuration = $configuration;
-        $this->template = $template;
+    public function __construct(
+        private Configuration $configuration,
+        private string $template
+    ) {
         // TODO: do not remove the slash from the beginning, change the templates instead!
-        $this->data['baseurlpath'] = ltrim($this->configuration->getBasePath(), '/');
+        $this->data['baseurlpath'] = ltrim($configuration->getBasePath(), '/');
 
         // parse module and template name
         list($this->module) = $this->findModuleAndTemplateName($template);
@@ -164,7 +141,7 @@ class Template extends Response
         $this->localization = new Localization($configuration);
 
         // check if we need to attach a theme controller
-        $controller = $this->configuration->getOptionalString('theme.controller', null);
+        $controller = $configuration->getOptionalString('theme.controller', null);
         if ($controller !== null) {
             if (
                 class_exists($controller)
@@ -567,15 +544,15 @@ class Template extends Response
     /**
      * Send this template as a response.
      *
-     * @return $this This response.
+     * @return static This response.
      * @throws \Exception if the template cannot be found.
-     *
-     * Note: No return type possible due to upstream limitations
      */
     public function send(): static
     {
         $this->content = $this->getContents();
-        return parent::send();
+        parent::send();
+
+        return $this;
     }
 
 
@@ -620,7 +597,7 @@ class Template extends Response
      *
      * @return \Twig\Environment The Twig instance in use.
      */
-    public function getTwig(): \Twig\Environment
+    public function getTwig(): Environment
     {
         return $this->twig;
     }
@@ -678,13 +655,16 @@ class Template extends Response
      * language and fallback language; it will return the property value (which
      * can be a string, array or other type allowed in metadata, if not found it
      * returns null.
+     *
+     * @return string|array|null
      */
-    public function getEntityPropertyTranslation(string $property, array $data)
+    public function getEntityPropertyTranslation(string $property, array $data): string|array|null
     {
         $tryLanguages = $this->translator->getLanguage()->getPreferredLanguages();
 
         foreach ($tryLanguages as $language) {
             if (isset($data[$property][$language])) {
+                Assert::string($data[$property][$language]);
                 return $data[$property][$language];
             }
         }

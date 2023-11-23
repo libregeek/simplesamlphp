@@ -8,6 +8,9 @@ use PHPUnit\Framework\TestCase;
 use SimpleSAML\Configuration;
 use SimpleSAML\Metadata\SAMLBuilder;
 use SimpleSAML\Module\saml\Auth\Source\SP;
+use SimpleSAML\XML\{Chunk, DOMDocumentFactory};
+
+use function array_keys;
 
 /**
  * Class SAMLBuilderTest
@@ -16,7 +19,7 @@ use SimpleSAML\Module\saml\Auth\Source\SP;
  */
 class SAMLBuilderTest extends TestCase
 {
-    private const SECURITY = 'vendor/simplesamlphp/xml-security/tests/resources';
+    private const SECURITY = 'vendor/simplesamlphp/xml-security/resources';
 
     /**
      */
@@ -268,7 +271,7 @@ class SAMLBuilderTest extends TestCase
         $entityId = 'https://entity.example.com/id';
         $set = 'saml20-idp-remote';
 
-        $dom = \SAML2\DOMDocumentFactory::create();
+        $dom = DOMDocumentFactory::create();
         $republishRequest = $dom->createElementNS(
             'http://eduid.cz/schema/metadata/1.0',
             'eduidmd:RepublishRequest'
@@ -280,7 +283,7 @@ class SAMLBuilderTest extends TestCase
             $republishTargetContent
         );
         $republishRequest->appendChild($republishTarget);
-        $ext = [new \SAML2\XML\Chunk($republishRequest)];
+        $ext = [new Chunk($republishRequest)];
 
         $metadata = [
             'entityid' => $entityId,
@@ -315,21 +318,25 @@ class SAMLBuilderTest extends TestCase
             'metadata-set' => $set,
             'contacts' => [
                 [
-                   'contactType'       => 'other',
-                   'emailAddress'      => 'csirt@example.com',
-                   'surName'           => 'CSIRT',
-                   'telephoneNumber'   => '+31SECOPS',
-                   'company'           => 'Acme Inc',
-                   'attributes'        => [
-                       'xmlns:remd'        => 'http://refeds.org/metadata',
-                       'remd:contactType'  => 'http://refeds.org/metadata/contactType/security',
-                   ],
+                    'ContactType'       => 'other',
+                    'EmailAddress'      => ['csirt@example.com'],
+                    'SurName'           => 'CSIRT',
+                    'TelephoneNumber'   => ['+31SECOPS'],
+                    'Company'           => 'Acme Inc',
+                    'attributes' => [
+                        [
+                            'namespaceURI' => 'http://refeds.org/metadata',
+                            'namespacePrefix' => 'remd',
+                            'attrName' => 'contactType',
+                            'attrValue' => 'http://refeds.org/metadata/contactType/security',
+                        ],
+                    ],
                 ],
                 [
-                   'contactType'       => 'administrative',
-                   'emailAddress'      => 'j.doe@example.edu',
-                   'givenName'         => 'Jane',
-                   'surName'           => 'Doe',
+                    'ContactType'       => 'administrative',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'GivenName'         => 'Jane',
+                    'SurName'           => 'Doe',
                 ],
             ],
         ];

@@ -5,14 +5,16 @@ declare(strict_types=1);
 namespace SimpleSAML\Test\Module\saml\IdP;
 
 use InvalidArgumentException;
-use SAML2\XML\Chunk;
-use SimpleSAML\Configuration;
+use SimpleSAML\Assert\AssertionFailedException;
+use SimpleSAML\{Configuration, IdP};
 use SimpleSAML\Error\Exception;
-use SimpleSAML\IdP;
-use SimpleSAML\Metadata\MetaDataStorageHandler;
-use SimpleSAML\Metadata\MetaDataStorageHandlerSerialize;
+use SimpleSAML\Metadata\{MetaDataStorageHandler, MetaDataStorageHandlerSerialize};
 use SimpleSAML\Module\saml\IdP\SAML2;
 use SimpleSAML\TestUtils\ClearStateTestCase;
+use SimpleSAML\XML\{Chunk, DOMDocumentFactory};
+use Symfony\Component\HttpFoundation\{Request, Response};
+
+use function http_build_query;
 
 /**
  * @covers \SimpleSAML\Module\saml\IdP\SAML2
@@ -20,7 +22,7 @@ use SimpleSAML\TestUtils\ClearStateTestCase;
 class SAML2Test extends ClearStateTestCase
 {
     /** @var string */
-    private const SECURITY = 'vendor/simplesamlphp/xml-security/tests/resources';
+    private const SECURITY = 'vendor/simplesamlphp/xml-security/resources';
 
     /** @var string */
     public const CERT_KEY = '../' . self::SECURITY . '/certificates/selfsigned.simplesamlphp.org.key';
@@ -60,7 +62,7 @@ class SAML2Test extends ClearStateTestCase
         $this->assertEquals('https://some-sp-entity-id', $state['SPMetadata']['entityid']);
 
         $this->assertStringStartsWith(
-            'http://idp.examlple.com/module.php/saml/idp/singleSignOnService?spentityid=https%3A%2F%2Fsome-sp-entity-id&cookie',
+            'http://idp.example.com/module.php/saml/idp/singleSignOnService?spentityid=https%3A%2F%2Fsome-sp-entity-id&cookie',
             $state['\SimpleSAML\Auth\State.restartURL']
         );
         unset($state['saml:AuthnRequestReceivedAt']); // timestamp can't be tested in equality assertion
@@ -91,7 +93,7 @@ class SAML2Test extends ClearStateTestCase
 
         //currently only spentityid and relay state are used in the restart url.
         $this->assertStringStartsWith(
-            'http://idp.examlple.com/module.php/saml/idp/singleSignOnService?'
+            'http://idp.example.com/module.php/saml/idp/singleSignOnService?'
             . 'spentityid=https%3A%2F%2Fsome-sp-entity-id&RelayState=http%3A%2F%2Frelay&cookieTime',
             $state['\SimpleSAML\Auth\State.restartURL']
         );
@@ -120,7 +122,7 @@ class SAML2Test extends ClearStateTestCase
         $this->assertEquals('https://some-sp-entity-id', $state['SPMetadata']['entityid']);
 
         $this->assertStringStartsWith(
-            'http://idp.examlple.com/module.php/saml/idp/singleSignOnService?spentityid=https%3A%2F%2Fsome-sp-entity-id&cookie',
+            'http://idp.example.com/module.php/saml/idp/singleSignOnService?spentityid=https%3A%2F%2Fsome-sp-entity-id&cookie',
             $state['\SimpleSAML\Auth\State.restartURL']
         );
         unset($state['saml:AuthnRequestReceivedAt']); // timestamp can't be tested in equality assertion
@@ -149,7 +151,7 @@ class SAML2Test extends ClearStateTestCase
 
         //currently only spentityid and relay state are used in the restart url.
         $this->assertStringStartsWith(
-            'http://idp.examlple.com/module.php/saml/idp/singleSignOnService?'
+            'http://idp.example.com/module.php/saml/idp/singleSignOnService?'
             . 'spentityid=https%3A%2F%2Fsome-sp-entity-id&RelayState=http%3A%2F%2Frelay&cookieTime',
             $state['\SimpleSAML\Auth\State.restartURL']
         );
@@ -202,32 +204,31 @@ EOT;
             'metadata.sources' => [
                 ["type" => "xml", 'xml' => $spMetadataXml],
             ],
+            'enable.saml20-idp' => true,
         ], '', 'simplesaml');
 
-        // Since we aren't really running on a webserver some of the url calculations done, such as for restart url
-        // won't line up perfectly
-        $_REQUEST = $_REQUEST + $queryParams;
-        $_SERVER['HTTP_HOST'] = 'idp.examlple.com';
-        $_SERVER['REQUEST_URI'] = '/module.php/saml/idp/singleSignOnService?' . http_build_query($queryParams);
-
-
         $state = [];
-
         $idpStub->expects($this->once())
             ->method('handleAuthenticationRequest')
             ->with($this->callback(
-                /**
-                 * @param array $arg
-                 * @return bool
-                 */
+                //
+                 // @param array $arg
+                 // @return bool
+                 //
                 function ($arg) use (&$state) {
                     $state = $arg;
                     return true;
                 }
-            ));
+            ))
+            ->willReturn(new Response('', 200, ['Host' => 'idp.example.com']));
+
+        $request = Request::create('/singleSingOnService', 'GET', $queryParams, [], [], ['Host' => 'idp.example.com']);
+        $_REQUEST = $_REQUEST + $queryParams;
+        $_SERVER['HTTP_HOST'] = 'idp.example.com';
+        $_SERVER['REQUEST_URI'] = '/module.php/saml/idp/singleSignOnService?' . http_build_query($queryParams);
 
         /** @psalm-suppress InvalidArgument */
-        SAML2::receiveAuthnRequest($idpStub);
+        SAML2::receiveAuthnRequest($request, $idpStub);
 
         return $state;
     }
@@ -244,12 +245,12 @@ EOT;
      */
     private function idpMetadataHandlerHelper(array $metadata, array $extraconfig = []): array
     {
-        Configuration::loadFromArray([
+        $config = Configuration::loadFromArray([
             'metadata.sources' => [
                 ["type" => "serialize", "directory" => "/tmp"],
             ],
         ] + $extraconfig, '', 'simplesaml');
-        $metaHandler = new MetaDataStorageHandlerSerialize(['directory' => '/tmp']);
+        $metaHandler = new MetaDataStorageHandlerSerialize($config, ['directory' => '/tmp']);
 
         $metadata['entityid'] = 'urn:example:simplesaml:idp';
         $metadata['certificate'] = self::CERT_PUBLIC;
@@ -562,7 +563,7 @@ EOT;
      */
     public function testMetadataHostedEntityExtensions(): void
     {
-        $dom = \SAML2\DOMDocumentFactory::create();
+        $dom = DOMDocumentFactory::create();
         $republishRequest = $dom->createElementNS('http://eduid.cz/schema/metadata/1.0', 'eduidmd:RepublishRequest');
         $republishTarget = $dom->createElementNS(
             'http://eduid.cz/schema/metadata/1.0',
@@ -632,9 +633,12 @@ EOT;
     {
         $config = [
             'RegistrationInfo' => [
-                'authority' => 'urn:mace:sp.example.org',
-                'instant' => '2008-01-17T11:28:03.577Z',
-                'policies' => ['en' => 'http://sp.example.org/policy', 'es' => 'http://sp.example.org/politica'],
+                'RegistrationAuthority' => 'urn:mace:sp.example.org',
+                'RegistrationInstant' => '2008-01-17T11:28:03.577Z',
+                'RegistrationPolicy' => [
+                    'en' => 'http://sp.example.org/policy',
+                    'es' => 'http://sp.example.org/politica',
+                ],
             ],
         ];
         $md = $this->idpMetadataHandlerHelper($config);
@@ -642,11 +646,11 @@ EOT;
         $this->assertArrayHasKey('RegistrationInfo', $md);
         $reginfo = $md['RegistrationInfo'];
         $this->assertIsArray($reginfo);
-        $this->assertEquals('urn:mace:sp.example.org', $reginfo['authority']);
-        $this->assertEquals('2008-01-17T11:28:03.577Z', $reginfo['instant']);
-        $this->assertIsArray($reginfo['policies']);
-        $this->assertCount(2, $reginfo['policies']);
-        $this->assertEquals('http://sp.example.org/politica', $reginfo['policies']['es']);
+        $this->assertEquals('urn:mace:sp.example.org', $reginfo['RegistrationAuthority']);
+        $this->assertEquals('2008-01-17T11:28:03.577Z', $reginfo['RegistrationInstant']);
+        $this->assertIsArray($reginfo['RegistrationPolicy']);
+        $this->assertCount(2, $reginfo['RegistrationPolicy']);
+        $this->assertEquals('http://sp.example.org/politica', $reginfo['RegistrationPolicy']['es']);
     }
 
     /**
@@ -674,21 +678,25 @@ EOT;
     {
         $config = ['contacts' => [
             [
-               'contactType'       => 'other',
-               'emailAddress'      => 'csirt@example.com',
-               'surName'           => 'CSIRT',
-               'telephoneNumber'   => '+31SECOPS',
-               'company'           => 'Acme Inc',
+               'ContactType'       => 'other',
+               'EmailAddress'      => ['csirt@example.com'],
+               'SurName'           => 'CSIRT',
+               'TelephoneNumber'   => ['+31SECOPS'],
+               'Company'           => 'Acme Inc',
                'attributes'        => [
-                   'xmlns:remd'        => 'http://refeds.org/metadata',
-                   'remd:contactType'  => 'http://refeds.org/metadata/contactType/security',
-               ],
+                    [
+                        'namespaceURI' => 'http://refeds.org/metadata',
+                        'namespacePrefix' => 'remd',
+                        'attrName' => 'contactType',
+                        'attrValue' => 'http://refeds.org/metadata/contactType/security',
+                    ],
+                ],
             ],
             [
-               'contactType'       => 'administrative',
-               'emailAddress'      => 'j.doe@example.edu',
-               'givenName'         => 'Jane',
-               'surName'           => 'Doe',
+               'ContactType'       => 'administrative',
+               'EmailAddress'      => ['j.doe@example.edu'],
+               'GivenName'         => 'Jane',
+               'SurName'           => 'Doe',
             ],
         ]];
         $md = $this->idpMetadataHandlerHelper($config);
@@ -701,22 +709,26 @@ EOT;
         $contact = $md['contacts'][0];
 
         $this->assertIsArray($contact);
-        $this->assertEquals('other', $contact['contactType']);
-        $this->assertEquals('CSIRT', $contact['surName']);
-        $this->assertArrayNotHasKey('givenName', $contact);
-        $this->assertEquals('+31SECOPS', $contact['telephoneNumber']);
-        $this->assertEquals('Acme Inc', $contact['company']);
+        $this->assertEquals('other', $contact['ContactType']);
+        $this->assertEquals('CSIRT', $contact['SurName']);
+        $this->assertArrayNotHasKey('GivenName', $contact);
+        $this->assertEquals(['+31SECOPS'], $contact['TelephoneNumber']);
+        $this->assertEquals('Acme Inc', $contact['Company']);
         $this->assertIsArray($contact['attributes']);
         $attrs = [
-            'xmlns:remd' => 'http://refeds.org/metadata',
-            'remd:contactType' => 'http://refeds.org/metadata/contactType/security'
+            [
+                'namespaceURI' => 'http://refeds.org/metadata',
+                'namespacePrefix' => 'remd',
+                'attrName' => 'contactType',
+                'attrValue' => 'http://refeds.org/metadata/contactType/security',
+            ],
         ];
         $this->assertEquals($attrs, $contact['attributes']);
 
         $contact = $md['contacts'][1];
         $this->assertIsArray($contact);
-        $this->assertEquals('administrative', $contact['contactType']);
-        $this->assertEquals('j.doe@example.edu', $contact['emailAddress']);
+        $this->assertEquals('administrative', $contact['ContactType']);
+        $this->assertEquals(['mailto:j.doe@example.edu'], $contact['EmailAddress']);
         $this->assertArrayNotHasKey('attributes', $contact);
     }
 
@@ -732,10 +744,10 @@ EOT;
 
         $config = ['contacts' => [
             [
-               'contactType'       => 'technical',
-               'emailAddress'      => 'j.doe@example.edu',
-               'givenName'         => 'Jane',
-               'surName'           => 'Doe',
+               'ContactType'       => 'technical',
+               'EmailAddress'      => ['j.doe@example.edu'],
+               'GivenName'         => 'Jane',
+               'SurName'           => 'Doe',
             ],
         ]];
         $md = $this->idpMetadataHandlerHelper($config, $globalConfig);
@@ -748,15 +760,15 @@ EOT;
         $contact = $md['contacts'][0];
 
         $this->assertIsArray($contact);
-        $this->assertEquals('technical', $contact['contactType']);
-        $this->assertEquals('Doe', $contact['surName']);
+        $this->assertEquals('technical', $contact['ContactType']);
+        $this->assertEquals('Doe', $contact['SurName']);
 
         $contact = $md['contacts'][1];
         $this->assertIsArray($contact);
-        $this->assertEquals('technical', $contact['contactType']);
-        $this->assertEquals('someone.somewhere@example.org', $contact['emailAddress']);
-        $this->assertEquals('Someone von Somewhere', $contact['givenName']);
-        $this->assertArrayNotHasKey('surName', $contact);
+        $this->assertEquals('technical', $contact['ContactType']);
+        $this->assertEquals(['mailto:someone.somewhere@example.org'], $contact['EmailAddress']);
+        $this->assertEquals('Someone von Somewhere', $contact['GivenName']);
+        $this->assertArrayNotHasKey('SurName', $contact);
     }
 
     /**
@@ -772,16 +784,16 @@ EOT;
         $config = [
             'contacts' => [
                 [
-                    'contactType'       => 'technical',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'technical',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'SurName'           => 'Doe',
                 ],
             ]
         ];
         $md = $this->idpMetadataHandlerHelper($config, $globalConfig);
 
         $this->assertCount(1, $md['contacts']);
-        $this->assertEquals('j.doe@example.edu', $md['contacts'][0]['emailAddress']);
+        $this->assertEquals(['mailto:j.doe@example.edu'], $md['contacts'][0]['EmailAddress']);
     }
 
     /**
@@ -791,15 +803,17 @@ EOT;
     {
         $config = ['contacts' => [
             [
-               'contactType'       => 'anything',
-               'emailAddress'      => 'j.doe@example.edu',
-               'givenName'         => 'Jane',
-               'surName'           => 'Doe',
+               'ContactType'       => 'anything',
+               'EmailAddress'      => ['j.doe@example.edu'],
+               'GivenName'         => 'Jane',
+               'SurName'           => 'Doe',
             ],
         ]];
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('"contactType" is mandatory and must be one of');
+        $this->expectException(AssertionFailedException::class);
+        $this->expectExceptionMessage(
+            'Expected one of: "technical", "support", "administrative", "billing", "other". Got: "anything"',
+        );
         $this->idpMetadataHandlerHelper($config);
     }
 }

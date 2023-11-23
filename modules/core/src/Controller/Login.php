@@ -4,24 +4,17 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\core\Controller;
 
-use Exception;
-use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
-use SimpleSAML\Module;
-use SimpleSAML\Module\core\Auth\UserPassBase;
-use SimpleSAML\Module\core\Auth\UserPassOrgBase;
-use SimpleSAML\Utils;
+use Exception as BuiltinException;
+use SimpleSAML\{Auth, Configuration, Error, Module, Utils};
+use SimpleSAML\Module\core\Auth\{UserPassBase, UserPassOrgBase};
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Cookie;
-use Symfony\Component\HttpFoundation\RedirectResponse;
-use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\{Cookie, RedirectResponse, Request, Response};
 
 use function array_key_exists;
 use function substr;
+use function strval;
 use function time;
+use function trim;
 
 /**
  * Controller class for the core module.
@@ -32,9 +25,6 @@ use function time;
  */
 class Login
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /**
      * @var \SimpleSAML\Auth\Source|string
      * @psalm-var \SimpleSAML\Auth\Source|class-string
@@ -58,9 +48,8 @@ class Login
      * @throws \Exception
      */
     public function __construct(
-        Configuration $config
+        protected Configuration $config
     ) {
-        $this->config = $config;
     }
 
 
@@ -101,9 +90,9 @@ class Login
      * username/password authentication.
      *
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function loginuserpass(Request $request): Template
+    public function loginuserpass(Request $request): Response
     {
         // Retrieve the authentication state
         if (!$request->query->has('AuthState')) {
@@ -117,7 +106,7 @@ class Login
         /** @var \SimpleSAML\Module\core\Auth\UserPassBase|null $source */
         $source = $this->authSource::getById($state[UserPassBase::AUTHID]);
         if ($source === null) {
-            throw new Exception(
+            throw new BuiltinException(
                 'Could not find authentication source with id ' . $state[UserPassBase::AUTHID]
             );
         }
@@ -132,11 +121,10 @@ class Login
      * @param \Symfony\Component\HttpFoundation\Request $request
      * @param \SimpleSAML\Module\core\Auth\UserPassBase|\SimpleSAML\Module\core\Auth\UserPassOrgBase $source
      * @param array $state
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    private function handleLogin(Request $request, $source, array $state): Template
+    private function handleLogin(Request $request, UserPassBase|UserPassOrgBase $source, array $state): Response
     {
-        Assert::isInstanceOfAny($source, [UserPassBase::class, UserPassOrgBase::class]);
         $authStateId = $request->query->get('AuthState');
         $this->authState::validateStateId($authStateId);
 
@@ -157,9 +145,9 @@ class Login
             $errorParams = $state['error']['params'];
         }
 
-        $cookies = [];
         if ($organizations === null || $organization !== '') {
             if (!empty($username) || !empty($password)) {
+                $cookies = [];
                 $httpUtils = new Utils\HTTP();
                 $sameSiteNone = $httpUtils->canSetSamesiteNone() ? Cookie::SAMESITE_NONE : null;
 
@@ -223,10 +211,16 @@ class Login
 
                 try {
                     if ($source instanceof UserPassOrgBase) {
-                        UserPassOrgBase::handleLogin($authStateId, $username, $password, $organization);
+                        $response = UserPassOrgBase::handleLogin($authStateId, $username, $password, $organization);
                     } else {
-                        UserPassBase::handleLogin($authStateId, $username, $password);
+                        $response = UserPassBase::handleLogin($authStateId, $username, $password);
                     }
+
+                    foreach ($cookies as $cookie) {
+                        $response->headers->setCookie($cookie);
+                    }
+
+                    return $response;
                 } catch (Error\Error $e) {
                     // Login failed. Extract error code and parameters, to display the error
                     $errorCode = $e->getErrorCode();
@@ -304,10 +298,6 @@ class Login
             $t->data['SPMetadata'] = null;
         }
 
-        foreach ($cookies as $cookie) {
-            $t->headers->setCookie($cookie);
-        }
-
         return $t;
     }
 
@@ -318,9 +308,9 @@ class Login
      * username/password/organization authentication.
      *
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function loginuserpassorg(Request $request): Template
+    public function loginuserpassorg(Request $request): Response
     {
         // Retrieve the authentication state
         if (!$request->query->has('AuthState')) {
@@ -334,7 +324,7 @@ class Login
         /** @var \SimpleSAML\Module\core\Auth\UserPassOrgBase $source */
         $source = $this->authSource::getById($state[UserPassOrgBase::AUTHID]);
         if ($source === null) {
-            throw new Exception(
+            throw new BuiltinException(
                 'Could not find authentication source with id ' . $state[UserPassOrgBase::AUTHID]
             );
         }
@@ -383,7 +373,7 @@ class Login
         $username = '';
 
         if ($request->request->has('username')) {
-            $username = $request->request->get('username');
+            $username = trim($request->request->get('username'));
         } elseif (
             $source->getRememberUsernameEnabled()
             && $request->cookies->has($source->getAuthId() . '-username')
@@ -466,7 +456,7 @@ class Login
      *
      * @param Request $request The request that lead to this login operation.
      */
-    public function cleardiscochoices(Request $request): void
+    public function cleardiscochoices(Request $request): RedirectResponse
     {
         $httpUtils = new Utils\HTTP();
 
@@ -486,6 +476,6 @@ class Login
         $returnTo = $this->getReturnPath($request);
 
         // Redirect to destination.
-        $httpUtils->redirectTrustedURL($returnTo);
+        return $httpUtils->redirectTrustedURL($returnTo);
     }
 }

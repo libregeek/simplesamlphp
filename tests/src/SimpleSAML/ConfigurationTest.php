@@ -5,10 +5,9 @@ declare(strict_types=1);
 namespace SimpleSAML\Test;
 
 use Exception;
-use SAML2\Constants;
 use SimpleSAML\Assert\AssertionFailedException;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
+use SimpleSAML\{Configuration, Error};
+use SimpleSAML\SAML2\Constants as C;
 use SimpleSAML\TestUtils\ClearStateTestCase;
 
 /**
@@ -48,7 +47,7 @@ class ConfigurationTest extends ClearStateTestCase
         try {
             Configuration::getInstance();
             $this->fail('Exception expected');
-        } catch (Error\CriticalConfigurationError $var) {
+        } catch (Error\CriticalConfigurationError) {
             // This exception is expected.
         }
         /*
@@ -728,14 +727,14 @@ class ConfigurationTest extends ClearStateTestCase
             [
                 [
                     'Location' => 'https://example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_POST,
+                    'Binding' => C::BINDING_HTTP_POST,
                 ],
             ],
             // define the ResponseLocation too
             [
                 [
                     'Location' => 'https://example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_POST,
+                    'Binding' => C::BINDING_HTTP_POST,
                     'ResponseLocation' => 'https://example.com/endpoint.php',
                 ],
             ],
@@ -744,12 +743,12 @@ class ConfigurationTest extends ClearStateTestCase
                 [
                     'index' => 1,
                     'Location' => 'https://www1.example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                    'Binding' => C::BINDING_HTTP_REDIRECT,
                 ],
                 [
                     'index' => 2,
                     'Location' => 'https://www2.example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_POST,
+                    'Binding' => C::BINDING_HTTP_POST,
                 ],
             ],
             // make sure isDefault has priority over indexes
@@ -757,13 +756,13 @@ class ConfigurationTest extends ClearStateTestCase
                 [
                     'index' => 1,
                     'Location' => 'https://www2.example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_POST,
+                    'Binding' => C::BINDING_HTTP_POST,
                 ],
                 [
                     'index' => 2,
                     'isDefault' => true,
                     'Location' => 'https://www1.example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                    'Binding' => C::BINDING_HTTP_REDIRECT,
                 ],
             ],
             // make sure endpoints with invalid bindings are ignored and those marked as NOT default are still used
@@ -777,7 +776,7 @@ class ConfigurationTest extends ClearStateTestCase
                     'index' => 2,
                     'isDefault' => false,
                     'Location' => 'https://www2.example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_POST,
+                    'Binding' => C::BINDING_HTTP_POST,
                 ],
             ],
         ];
@@ -785,34 +784,34 @@ class ConfigurationTest extends ClearStateTestCase
             // output should be completed with the default binding (HTTP-POST for ACS)
             [
                 'Location' => 'https://example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_POST,
+                'Binding' => C::BINDING_HTTP_POST,
             ],
             // we should just get the first endpoint with the default binding
             [
                 'Location' => 'https://www1.example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_POST,
+                'Binding' => C::BINDING_HTTP_POST,
             ],
             // if we specify the binding, we should get it back
             [
                 'Location' => 'https://example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_POST
+                'Binding' => C::BINDING_HTTP_POST
             ],
             // if we specify ResponseLocation, we should get it back too
             [
                 'Location' => 'https://example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_POST,
+                'Binding' => C::BINDING_HTTP_POST,
                 'ResponseLocation' => 'https://example.com/endpoint.php',
             ],
             // indexes must NOT be taken into account, order is the only thing that matters here
             [
                 'Location' => 'https://www1.example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                'Binding' => C::BINDING_HTTP_REDIRECT,
                 'index' => 1,
             ],
             // isDefault must have higher priority than indexes
             [
                 'Location' => 'https://www1.example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                'Binding' => C::BINDING_HTTP_REDIRECT,
                 'isDefault' => true,
                 'index' => 2,
             ],
@@ -821,7 +820,7 @@ class ConfigurationTest extends ClearStateTestCase
                 'index' => 2,
                 'isDefault' => false,
                 'Location' => 'https://www2.example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_POST,
+                'Binding' => C::BINDING_HTTP_POST,
             ]
         ];
 
@@ -836,11 +835,11 @@ class ConfigurationTest extends ClearStateTestCase
         ];
 
         $valid_bindings = [
-            Constants::BINDING_HTTP_POST,
-            Constants::BINDING_HTTP_REDIRECT,
-            Constants::BINDING_HOK_SSO,
-            Constants::BINDING_HTTP_ARTIFACT,
-            Constants::BINDING_SOAP,
+            C::BINDING_HTTP_POST,
+            C::BINDING_HTTP_REDIRECT,
+            C::BINDING_HOK_SSO,
+            C::BINDING_HTTP_ARTIFACT,
+            C::BINDING_SOAP,
         ];
 
         // run all general tests with AssertionConsumerService endpoint type
@@ -858,14 +857,14 @@ class ConfigurationTest extends ClearStateTestCase
         $this->assertEquals(
             [
                 'Location' => 'https://example.com/ars',
-                'Binding' => Constants::BINDING_SOAP,
+                'Binding' => C::BINDING_SOAP,
             ],
             $c->getDefaultEndpoint('ArtifactResolutionService')
         );
         $this->assertEquals(
             [
                 'Location' => 'https://example.com/slo',
-                'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                'Binding' => C::BINDING_HTTP_REDIRECT,
             ],
             $c->getDefaultEndpoint('SingleLogoutService')
         );
@@ -913,7 +912,7 @@ class ConfigurationTest extends ClearStateTestCase
         $e = [
             [
                 'Location' => 'https://example.com/endpoint.php',
-                'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                'Binding' => C::BINDING_HTTP_REDIRECT,
                 'ResponseLocation' => 'https://example.com/response.php',
             ]
         ];
@@ -964,7 +963,7 @@ class ConfigurationTest extends ClearStateTestCase
             [
                 [
                     'Location' => 'https://example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                    'Binding' => C::BINDING_HTTP_REDIRECT,
                     'ResponseLocation' => 1234,
                 ],
             ],
@@ -972,7 +971,7 @@ class ConfigurationTest extends ClearStateTestCase
             [
                 [
                     'Location' => 'https://example.com/endpoint.php',
-                    'Binding' => Constants::BINDING_HTTP_REDIRECT,
+                    'Binding' => C::BINDING_HTTP_REDIRECT,
                     'index' => 'string',
                 ],
             ],

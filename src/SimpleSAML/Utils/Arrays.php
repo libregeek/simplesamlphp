@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Utils;
 
+use function array_key_exists;
+use function is_array;
+
 /**
  * Array-related utility methods.
  *
@@ -21,7 +24,7 @@ class Arrays
      *     array.
      *
      */
-    public function arrayize($data, $index = 0): array
+    public function arrayize(mixed $data, mixed $index = 0): array
     {
         return (is_array($data)) ? $data : [$index => $data];
     }
@@ -35,7 +38,7 @@ class Arrays
      * @return array|false The transposed array, or false if $array is not a valid two-dimensional array.
      *
      */
-    public function transpose(array $array)
+    public function transpose(array $array): array|false
     {
         $ret = [];
         foreach ($array as $k1 => $a2) {

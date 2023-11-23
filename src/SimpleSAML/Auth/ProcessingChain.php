@@ -5,13 +5,21 @@ declare(strict_types=1);
 namespace SimpleSAML\Auth;
 
 use Exception;
-use SAML2\Exception\Protocol\NoPassiveException;
+use SimpleSAML\{Configuration, Error, Logger, Module, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Logger;
-use SimpleSAML\Module;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Exception\Protocol\NoPassiveException;
+use Symfony\Component\HttpFoundation\Response;
+
+use function array_key_exists;
+use function array_shift;
+use function array_splice;
+use function call_user_func;
+use function count;
+use function is_array;
+use function is_string;
+use function sprintf;
+use function str_replace;
+use function var_export;
 
 /**
  * Class for implementing authentication processing chains for IdPs.
@@ -197,7 +205,9 @@ class ProcessingChain
         try {
             while (count($state[self::FILTERS_INDEX]) > 0) {
                 $filter = array_shift($state[self::FILTERS_INDEX]);
-                $filter->process($state);
+                if ($filter->checkPrecondition($state) === true) {
+                    $filter->process($state);
+                }
             }
         } catch (Error\Exception $e) {
             // No need to convert the exception
@@ -225,7 +235,7 @@ class ProcessingChain
      *
      * @param array $state  The state we are processing.
      */
-    public static function resumeProcessing(array $state): void
+    public static function resumeProcessing(array $state): Response
     {
         while (count($state[self::FILTERS_INDEX]) > 0) {
             $filter = array_shift($state[self::FILTERS_INDEX]);
@@ -252,7 +262,7 @@ class ProcessingChain
              */
             $id = State::saveState($state, self::COMPLETED_STAGE);
             $httpUtils = new Utils\HTTP();
-            $httpUtils->redirectTrustedURL($state['ReturnURL'], [self::AUTHPARAM => $id]);
+            $response = $httpUtils->redirectTrustedURL($state['ReturnURL'], [self::AUTHPARAM => $id]);
         } else {
             /* Pass the state to the function defined in $state['ReturnCall']. */
 
@@ -262,9 +272,11 @@ class ProcessingChain
             $func = $state['ReturnCall'];
             Assert::isCallable($func);
 
-            call_user_func($func, $state);
-            Assert::true(false);
+            $response = call_user_func($func, $state);
+            Assert::isInstanceOf($response, Response::class);
         }
+
+        return $response;
     }
 
 
@@ -293,7 +305,7 @@ class ProcessingChain
             try {
                 $filter->process($state);
             } catch (NoPassiveException $e) {
-                // Ignore \SAML2\Exception\Protocol\NoPassiveException exceptions
+                // Ignore \SimpleSAML\SAML2\Exception\Protocol\NoPassiveException exceptions
             }
         }
     }
@@ -309,5 +321,41 @@ class ProcessingChain
     public static function fetchProcessedState(string $id): ?array
     {
         return State::loadState($id, self::COMPLETED_STAGE);
+    }
+
+
+    /**
+     * @param array $state
+     * @psalm-param array{"\\\SimpleSAML\\\Auth\\\ProcessingChain.filters": array} $state
+     * @param ProcessingFilter[] $authProcs
+     */
+    public static function insertFilters(array &$state, array $authProcs): void
+    {
+        if (count($authProcs) === 0) {
+            return;
+        }
+
+        Logger::debug(sprintf(
+            'ProcessingChainRuleInserter: Adding %d additional filters before remaining %d',
+            count($authProcs),
+            count($state[self::FILTERS_INDEX]),
+        ));
+
+        array_splice($state[self::FILTERS_INDEX], 0, 0, $authProcs);
+    }
+
+
+    /**
+     * @param array $state
+     * @psalm-param array{"\\\SimpleSAML\\\Auth\\\ProcessingChain.filters": array} $state
+     * @param array $authProcConfigs
+     * @return \SimpleSAML\Auth\ProcessingFilter[]
+     */
+    public static function createAndInsertFilters(array &$state, array $authProcConfigs): array
+    {
+        $filters = self::parseFilterList($authProcConfigs);
+        self::insertFilters($state, $filters);
+
+        return $filters;
     }
 }

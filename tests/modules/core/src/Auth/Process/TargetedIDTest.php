@@ -6,11 +6,10 @@ namespace SimpleSAML\Test\Module\core\Auth\Process;
 
 use Exception;
 use PHPUnit\Framework\TestCase;
-use SAML2\Constants;
-use SAML2\XML\saml\NameID;
-use SimpleSAML\Configuration;
+use SimpleSAML\{Configuration, Utils};
 use SimpleSAML\Module\core\Auth\Process\TargetedID;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\SAML2\XML\saml\NameID;
 
 /**
  * Test for the core:TargetedID filter.
@@ -109,11 +108,12 @@ class TargetedIDTest extends TestCase
      */
     public function testNameIdGeneration(): void
     {
-        $nameid = new NameID();
-        $nameid->setFormat(Constants::NAMEID_PERSISTENT);
-        $nameid->setNameQualifier('urn:example:src:id');
-        $nameid->setSPNameQualifier('joe');
-        $nameid->setValue('joe');
+        $nameid = new NameID(
+            value: 'joe',
+            Format: C::NAMEID_PERSISTENT,
+            NameQualifier: 'urn:example:src:id',
+            SPNameQualifier: 'joe',
+        );
 
         $config = [
             'nameId' => true,

@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace SimpleSAML\Test\Module\core\Auth;
 
 use PHPUnit\Framework\TestCase;
-use SAML2\Constants;
 use SimpleSAML\Error\Error as SspError;
+use SimpleSAML\Error\ErrorCodes;
 use SimpleSAML\Module\core\Auth\UserPassBase;
+use SimpleSAML\SAML2\Constants as C;
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * @covers \SimpleSAML\Module\core\Auth\UserPassBase
@@ -19,7 +21,7 @@ class UserPassBaseTest extends TestCase
     public function testAuthenticateECPCallsLoginAndSetsAttributes(): void
     {
         $state = [
-            'saml:Binding' => Constants::BINDING_PAOS,
+            'saml:Binding' => C::BINDING_PAOS,
         ];
         $attributes = ['attrib' => 'val'];
 
@@ -36,8 +38,9 @@ class UserPassBaseTest extends TestCase
             ->with($username, $password)
             ->will($this->returnValue($attributes));
 
+        $request = Request::createFromGlobals();
         /** @var \SimpleSAML\Module\core\Auth\UserPassBase $stub */
-        $stub->authenticate($state);
+        $stub->authenticate($request, $state);
 
         $this->assertSame($attributes, $state['Attributes']);
     }
@@ -48,10 +51,10 @@ class UserPassBaseTest extends TestCase
     public function testAuthenticateECPMissingUsername(): void
     {
         $this->expectException(SspError::class);
-        $this->expectExceptionMessage('WRONGUSERPASS');
+        $this->expectExceptionMessage(ErrorCodes::WRONGUSERPASS);
 
         $state = [
-            'saml:Binding' => Constants::BINDING_PAOS,
+            'saml:Binding' => C::BINDING_PAOS,
         ];
 
         unset($_SERVER['PHP_AUTH_USER']);
@@ -61,8 +64,9 @@ class UserPassBaseTest extends TestCase
             ->disableOriginalConstructor()
             ->getMockForAbstractClass();
 
+        $request = Request::createFromGlobals();
         /** @var \SimpleSAML\Module\core\Auth\UserPassBase $stub */
-        $stub->authenticate($state);
+        $stub->authenticate($request, $state);
     }
 
 
@@ -71,10 +75,10 @@ class UserPassBaseTest extends TestCase
     public function testAuthenticateECPMissingPassword(): void
     {
         $this->expectException(SspError::class);
-        $this->expectExceptionMessage('WRONGUSERPASS');
+        $this->expectExceptionMessage(ErrorCodes::WRONGUSERPASS);
 
         $state = [
-            'saml:Binding' => Constants::BINDING_PAOS,
+            'saml:Binding' => C::BINDING_PAOS,
         ];
 
         $_SERVER['PHP_AUTH_USER'] = 'username';
@@ -84,8 +88,9 @@ class UserPassBaseTest extends TestCase
             ->disableOriginalConstructor()
             ->getMockForAbstractClass();
 
+        $request = Request::createFromGlobals();
         /** @var \SimpleSAML\Module\core\Auth\UserPassBase $stub */
-        $stub->authenticate($state);
+        $stub->authenticate($request, $state);
     }
 
 
@@ -94,7 +99,7 @@ class UserPassBaseTest extends TestCase
     public function testAuthenticateECPCallsLoginWithForcedUsername(): void
     {
         $state = [
-            'saml:Binding' => Constants::BINDING_PAOS,
+            'saml:Binding' => C::BINDING_PAOS,
         ];
         $attributes = [];
 
@@ -113,8 +118,9 @@ class UserPassBaseTest extends TestCase
             ->with($forcedUsername, $password)
             ->will($this->returnValue($attributes));
 
+        $request = Request::createFromGlobals();
         /** @var \SimpleSAML\Module\core\Auth\UserPassBase $stub */
         $stub->setForcedUsername($forcedUsername);
-        $stub->authenticate($state);
+        $stub->authenticate($request, $state);
     }
 }

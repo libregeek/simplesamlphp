@@ -5,15 +5,23 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\admin\Controller;
 
 use Exception;
-use SimpleSAML\Configuration;
+use SimpleSAML\{Configuration, Module, Session, Utils};
 use SimpleSAML\Locale\Translate;
 use SimpleSAML\Metadata\MetaDataStorageHandler;
-use SimpleSAML\Module;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Symfony\Component\HttpFoundation\{Request, Response, StreamedResponse};
+
+use function curl_close;
+use function curl_exec;
+use function curl_getinfo;
+use function curl_init;
+use function curl_setopt;
+use function explode;
+use function function_exists;
+use function json_decode;
+use function ltrim;
+use function phpversion;
+use function version_compare;
 
 /**
  * Controller class for the admin module.
@@ -28,9 +36,6 @@ class Config
 
     public const RELEASES_API = 'https://api.github.com/repos/simplesamlphp/simplesamlphp/releases/latest';
 
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /** @var \SimpleSAML\Utils\Auth */
     protected Utils\Auth $authUtils;
 
@@ -40,9 +45,6 @@ class Config
     /** @var \SimpleSAML\Module\admin\Controller\Menu */
     protected Menu $menu;
 
-    /** @var \SimpleSAML\Session */
-    protected Session $session;
-
 
     /**
      * ConfigController constructor.
@@ -50,10 +52,10 @@ class Config
      * @param \SimpleSAML\Configuration $config The configuration to use.
      * @param \SimpleSAML\Session $session The current user session.
      */
-    public function __construct(Configuration $config, Session $session)
-    {
-        $this->config = $config;
-        $this->session = $session;
+    public function __construct(
+        protected Configuration $config,
+        protected Session $session
+    ) {
         $this->menu = new Menu();
         $this->authUtils = new Utils\Auth();
         $this->httpUtils = new Utils\HTTP();
@@ -76,11 +78,14 @@ class Config
      *
      * @param \Symfony\Component\HttpFoundation\Request $request The current request.
      *
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function diagnostics(Request $request): Template
+    public function diagnostics(Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         $t = new Template($this->config, 'admin:diagnostics.twig');
         $t->data = [
@@ -110,11 +115,14 @@ class Config
      *
      * @param \Symfony\Component\HttpFoundation\Request $request The current request.
      *
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function main(/** @scrutinizer ignore-unused */ Request $request): Template
+    public function main(/** @scrutinizer ignore-unused */ Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         $t = new Template($this->config, 'admin:config.twig');
         $t->data = [
@@ -165,11 +173,14 @@ class Config
      *
      * @param \Symfony\Component\HttpFoundation\Request $request The current request.
      *
-     * @return \Symfony\Component\HttpFoundation\StreamedResponse The output of phpinfo()
+     * @return \Symfony\Component\HttpFoundation\Response The output of phpinfo()
      */
-    public function phpinfo(/** @scrutinizer ignore-unused */ Request $request): StreamedResponse
+    public function phpinfo(/** @scrutinizer ignore-unused */ Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         return new StreamedResponse('phpinfo');
     }
@@ -195,11 +206,11 @@ class Config
                 'descr' => [
                     Translate::noop('PHP %minimum% or newer is needed. You are running: %current%'),
                     [
-                        '%minimum%' => '7.4',
+                        '%minimum%' => '8.0',
                         '%current%' => explode('-', phpversion())[0]
                     ]
                 ],
-                'enabled' => version_compare(phpversion(), '7.4', '>=')
+                'enabled' => version_compare(phpversion(), '8.0', '>=')
             ]
         ];
         $store = $this->config->getOptionalString('store.type', null);
@@ -358,52 +369,18 @@ class Config
             'enabled' => $this->config->getOptionalString('auth.adminpassword', '123') !== '123',
         ];
 
-        $cryptoUtils = new Utils\Crypto();
 
-        // perform some sanity checks on the configured certificates
-        if ($this->config->getOptionalBoolean('enable.saml20-idp', false) !== false) {
-            $handler = MetaDataStorageHandler::getMetadataHandler();
-            try {
-                $metadata = $handler->getMetaDataCurrent('saml20-idp-hosted');
-            } catch (Exception $e) {
+        // Add module specific checks via the sanitycheck hook that a module can provide.
+        $hookinfo = [ 'info' => [], 'errors' => [] ];
+        Module::callHooks('sanitycheck', $hookinfo);
+        foreach (['info', 'errors'] as $resulttype) {
+            foreach ($hookinfo[$resulttype] as $result) {
                 $matrix[] = [
                     'required' => 'required',
-                    'descr' => Translate::noop('Hosted IdP metadata present'),
-                    'enabled' => false
+                    'descr' => $result,
+                    'enabled' => $resulttype === 'info',
                 ];
             }
-
-            if (isset($metadata)) {
-                $metadata_config = Configuration::loadfromArray($metadata);
-                $private = $cryptoUtils->loadPrivateKey($metadata_config, false);
-                $public = $cryptoUtils->loadPublicKey($metadata_config, false);
-
-                $matrix[] = [
-                    'required' => 'required',
-                    'descr' => Translate::noop('Matching key-pair for signing assertions'),
-                    'enabled' => $this->matchingKeyPair($public['PEM'], $private['PEM'], $private['password']),
-                ];
-
-                $private = $cryptoUtils->loadPrivateKey($metadata_config, false, 'new_');
-                if ($private !== null) {
-                    $public = $cryptoUtils->loadPublicKey($metadata_config, false, 'new_');
-                    $matrix[] = [
-                        'required' => 'required',
-                        'descr' => Translate::noop('Matching key-pair for signing assertions (rollover key)'),
-                        'enabled' => $this->matchingKeyPair($public['PEM'], $private['PEM'], $private['password']),
-                    ];
-                }
-            }
-        }
-
-        if ($this->config->getOptionalBoolean('metadata.sign.enable', false) !== false) {
-            $private = $cryptoUtils->loadPrivateKey($this->config, false, 'metadata.sign.');
-            $public = $cryptoUtils->loadPublicKey($this->config, false, 'metadata.sign.');
-            $matrix[] = [
-                'required' => 'required',
-                'descr' => Translate::noop('Matching key-pair for signing metadata'),
-                'enabled' => $this->matchingKeyPair($public['PEM'], $private['PEM'], $private['password']),
-            ];
         }
 
         return $matrix;
@@ -491,22 +468,5 @@ class Config
         }
 
         return $warnings;
-    }
-
-
-    /**
-     * Test whether public & private key are a matching pair
-     *
-     * @param string $publicKey
-     * @param string $privateKey
-     * @param string|null $password
-     * @return bool
-     */
-    private function matchingKeyPair(
-        string $publicKey,
-        string $privateKey,
-        ?string $password = null
-    ): bool {
-        return openssl_x509_check_private_key($publicKey, [$privateKey, $password]);
     }
 }

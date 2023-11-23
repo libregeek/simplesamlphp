@@ -5,16 +5,74 @@
 This document lists the changes between versions of SimpleSAMLphp.
 See the upgrade notes for specific information about upgrading.
 
+## Version 2.1.0
+
+Released 2023-07-31
+
+* Functionality that before was provided by the sanitycheck-module is now implicit.
+  The module has been archived and should no longer be used. (#1843)
+* Add support for TLS configuration for Redis Store (#1828)
+* Add support for Metadata Deployment Profile for errorURL (#1841)
+* Raised minimum Symfony version to 6.0
+* Raise minimum PHP version to 8.0
+* Specified the allowed HTTP methods for each route
+* Our dependency on `composer/composer` was dropped in favour of a packaged phar-file.
+
+## Version 2.0.5
+
+* Never expose the cron-API if secret is not properly configured (#1831)
+* Fixed a bug where IdP-initiated SLO using the HTTP-POST binding wasn't properly dealt with
+
+## Version 2.0.4
+
+Released TBD
+
+* The source that was selected by the SourceSelector is now available in the state.
+* The zone that was selected by the SourceIPSelector is now available in the state.
+* The defaultSource for the SourceIPSelector can now be set to `null`. If none of the zones
+  are matched, a NotFound exception will be thrown.
+* It is now possible to set a default AuthnContext in the RequestedAuthnContextSelector.
+* Fixed a bug in MDQ metadata expiration
+* Resolved a possible object injection vulnerability in MDQ metadata cache
+* Restored the possibility to use HTTP-Artifact binding on AuthnRequests
+
+## Version 2.0.3
+
+Released 2023-03-29
+
+* Fix exception when translation-file does not exist
+* Correct host in generated URLS for IdPs with 'host' config in admin/federation (#1774, #1781)
+* Restore dev-autoloader (#1795)
+
+`authyubikey`
+
+* The module wasn't fully compatible with SSP 2.0 yet (v2.0.1)
+
+`cas`
+
+* Fixed a broken controller (simplesamlphp/simplesamlphp-module-cas#6) (v1.1.2)
+
+`saml2debug`
+
+* Fixed a broken controller (simplesamlphp/simplesamlphp-module-saml2debug#4) (v1.0.5)
+
+## Version 2.0.2
+
+Released 2023-03-10
+
+* Fixed the broken 2.0.1 release by restoring an accidentally removed file
+
 ## Version 2.0.1
 
 Released 2023-03-10
 
 * The language-menu on mobile devices was fixed
-* Fix logout completion for SP (#1780)
-* The `loginpage_links` functionality for authsources was restored and documented (#1773)
+* Fix some issues with logout (#1776, #1780, #1785)
+* The `loginpage_links` functionality for authsources was restored and documented (#1770, #1773)
 * Several issues regarding the use of the back-button were fixed (#1720)
 * Many fixes in documentation
 * Fixed config/authsources.php.dist so you can just rename it for new deployments to get you started (#1771)
+* Fixed UTF-8 encoding for metadata output
 * Fixed incompatibility with SSP 2.0 for the following modules;
   * consent
   * consentadmin

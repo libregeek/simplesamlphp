@@ -5,18 +5,14 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\cron\Controller;
 
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
-use SimpleSAML\Logger;
-use SimpleSAML\Module;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use SimpleSAML\{Auth, Configuration, Error, Logger, Module, Session, Utils};
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\RedirectResponse;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{RedirectResponse, Request, Response};
+
+use function array_key_exists;
+use function count;
+use function date;
+use function sprintf;
 
 /**
  * Controller class for the cron module.
@@ -28,18 +24,10 @@ use Symfony\Component\HttpFoundation\Response;
 class Cron
 {
     /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
-    /** @var \SimpleSAML\Configuration */
     protected Configuration $cronconfig;
 
-    /** @var \SimpleSAML\Session */
-    protected Session $session;
-
-    /**
-     * @var \SimpleSAML\Utils\Auth
-     */
-    protected $authUtils;
+    /** @var \SimpleSAML\Utils\Auth */
+    protected Utils\Auth $authUtils;
 
 
     /**
@@ -53,12 +41,10 @@ class Cron
      * @throws \Exception
      */
     public function __construct(
-        Configuration $config,
-        Session $session
+        protected Configuration $config,
+        protected Session $session
     ) {
-        $this->config = $config;
         $this->cronconfig = Configuration::getConfig('module_cron.php');
-        $this->session = $session;
         $this->authUtils = new Utils\Auth();
     }
 
@@ -77,14 +63,18 @@ class Cron
     /**
      * Show cron info.
      *
-     * @return \SimpleSAML\XHTML\Template
+     * @param \Symfony\Component\HttpFoundation\Request $request
+     * @return \Symfony\Component\HttpFoundation\Response|\SimpleSAML\XHTML\Template
      *   An HTML template or a redirection if we are not authenticated.
      */
-    public function info(): Template
+    public function info(/** @scrutinizer ignore-unused */Request $request): Response|Template
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
-        $key = $this->cronconfig->getOptionalString('key', 'secret');
+        $key = $this->cronconfig->getString('key');
         $tags = $this->cronconfig->getOptionalArray('allowed_tags', []);
 
         $def = [
@@ -115,25 +105,36 @@ class Cron
      *
      * This controller will start a cron operation
      *
+     * @param \Symfony\Component\HttpFoundation\Request $request
      * @param string $tag The tag
      * @param string $key The secret key
      * @param string $output The output format, defaulting to xhtml
      *
-     * @return \SimpleSAML\XHTML\Template|\Symfony\Component\HttpFoundation\Response
-     *   An HTML template, a redirect or a "runnable" response.
+     * @return \SimpleSAML\XHTML\Template An HTML template.
      *
      * @throws \SimpleSAML\Error\Exception
      */
-    public function run(string $tag, string $key, string $output = 'xhtml'): Response
-    {
-        $configKey = $this->cronconfig->getOptionalString('key', 'secret');
-        if ($key !== $configKey) {
-            throw new Error\Exception('Cron - Wrong key provided. Cron will not run.');
+    public function run(
+        /** @scrutinizer ignore-unused */Request $request,
+        string $tag,
+        string $key,
+        string $output = 'xhtml',
+    ): Template {
+        $configKey = $this->cronconfig->getString('key');
+
+        if ($key === 'secret' || $key === 'RANDOM_KEY') {
+            // TODO: Replace with condition in route when Symfony 6.1 is available
+            // Possible malicious attempt to run cron tasks with default secret
+            throw new Error\NotFound();
+        } elseif ($configKey === 'secret' || $configKey === 'RANDOM_KEY') {
+            throw new Error\ConfigurationError("Cron: no proper key has been configured.");
+        } elseif ($key !== $configKey) {
+            throw new Error\Exception('Cron: Wrong key provided. Cron will not run.');
         }
 
-        $cron = new \SimpleSAML\Module\cron\Cron();
+        $cron = new Module\cron\Cron();
         if (!$cron->isValidTag($tag)) {
-            throw new Error\Exception(sprintf('Cron - Illegal tag [%s].', $tag));
+            throw new Error\Exception(sprintf('Cron: Illegal tag [%s].', $tag));
         }
 
         $httpUtils = new Utils\HTTP();
@@ -163,6 +164,7 @@ class Cron
             $t->data['summary'] = $summary;
             return $t;
         }
-        return new Response();
+
+        throw new Error\Exception('Unknown output type.');
     }
 }

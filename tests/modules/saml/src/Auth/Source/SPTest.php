@@ -6,22 +6,21 @@ namespace SimpleSAML\Test\Module\saml\Auth\Source;
 
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
-use SAML2\AuthnRequest;
-use SAML2\Constants;
-use SAML2\XML\Chunk;
-use SAML2\DOMDocumentFactory;
-use SAML2\Exception\Protocol\NoAvailableIDPException;
-use SAML2\Exception\Protocol\NoSupportedIDPException;
-use SAML2\LogoutRequest;
-use SAML2\Utils;
-use SAML2\XML\saml\NameID;
 use SimpleSAML\Assert\AssertionFailedException;
 use SimpleSAML\Configuration;
 use SimpleSAML\Error\Exception;
+use SimpleSAML\SAML2\{AuthnRequest, LogoutRequest};
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\SAML2\Exception\Protocol\{NoAvailableIDPException, NoSupportedIDPException};
+use SimpleSAML\SAML2\Utils\XPath;
+use SimpleSAML\SAML2\XML\saml\AuthnContextClassRef;
+use SimpleSAML\SAML2\XML\saml\NameID;
+use SimpleSAML\SAML2\XML\samlp\{IDPEntry, IDPList};
 use SimpleSAML\Test\Metadata\MetaDataStorageSourceTest;
 use SimpleSAML\TestUtils\ClearStateTestCase;
-use SimpleSAML\Test\Utils\ExitTestException;
-use SimpleSAML\Test\Utils\SpTester;
+use SimpleSAML\Test\Utils\{ExitTestException, SpTester};
+use SimpleSAML\XML\{Chunk, DOMDocumentFactory};
+use Symfony\Component\HttpFoundation\Request;
 
 /**
  * Set of test cases for \SimpleSAML\Module\saml\Auth\Source\SP.
@@ -31,7 +30,7 @@ use SimpleSAML\Test\Utils\SpTester;
 class SPTest extends ClearStateTestCase
 {
     /** @var string */
-    private const SECURITY = 'vendor/simplesamlphp/xml-security/tests/resources';
+    private const SECURITY = 'vendor/simplesamlphp/xml-security/resources';
 
     /** @var string */
     public const CERT_KEY = '../' . self::SECURITY . '/certificates/selfsigned.simplesamlphp.org.key';
@@ -76,6 +75,7 @@ class SPTest extends ClearStateTestCase
     protected function setUp(): void
     {
         parent::setUp();
+
         $this->idpConfigArray = [
             'metadata-set'        => 'saml20-idp-remote',
             'entityid'            => 'https://engine.surfconext.nl/authentication/idp/metadata',
@@ -120,7 +120,7 @@ class SPTest extends ClearStateTestCase
      * @param array $state The state array to use in the test. This is an array of the parameters described in section
      * 2 of https://simplesamlphp.org/docs/development/saml:sp
      *
-     * @return \SAML2\AuthnRequest The AuthnRequest generated.
+     * @return \SimpleSAML\SAML2\AuthnRequest The AuthnRequest generated.
      */
     private function createAuthnRequest(array $state = []): AuthnRequest
     {
@@ -128,7 +128,7 @@ class SPTest extends ClearStateTestCase
         $config = ['entityID' => 'urn:x-simplesamlphp:example-sp'];
         $as = new SpTester($info, $config);
 
-        /** @var \SAML2\AuthnRequest $ar */
+        /** @var \SimpleSAML\SAML2\AuthnRequest $ar */
         $ar = null;
         try {
             $as->startSSO2Test($this->getIdpMetadata(), $state);
@@ -147,7 +147,7 @@ class SPTest extends ClearStateTestCase
      * @param array $state The state array to use in the test. This is an array of the parameters described in section
      * 2 of https://simplesamlphp.org/docs/development/saml:sp
      *
-     * @return \SAML2\LogoutRequest The LogoutRequest generated.
+     * @return \SimpleSAML\SAML2\LogoutRequest The LogoutRequest generated.
      */
     private function createLogoutRequest(array $state = []): LogoutRequest
     {
@@ -155,10 +155,10 @@ class SPTest extends ClearStateTestCase
         $config = ['entityID' => 'urn:x-simplesamlphp:example-sp'];
         $as = new SpTester($info, $config);
 
-        /** @var \SAML2\LogoutRequest $lr */
+        /** @var \SimpleSAML\SAML2\LogoutRequest $lr */
         $lr = null;
         try {
-            $as->startSLO2($state);
+            $as->startSLO2($this->config, $state);
             $this->assertTrue(false, 'Expected ExitTestException');
         } catch (ExitTestException $e) {
             $r = $e->getTestResult();
@@ -178,14 +178,15 @@ class SPTest extends ClearStateTestCase
 
         $xml = $ar->toSignedXML();
 
+        $xpCache = XPath::getXPath($xml);
         /** @var \DOMAttr[] $q */
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/@Destination');
+        $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/@Destination', $xpCache);
         $this->assertEquals(
             $this->idpConfigArray['SingleSignOnService'][0]['Location'],
             $q[0]->value
         );
 
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/saml:Issuer');
+        $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/saml:Issuer', $xpCache);
         $this->assertEquals(
             'urn:x-simplesamlphp:example-sp',
             $q[0]->textContent
@@ -200,28 +201,29 @@ class SPTest extends ClearStateTestCase
     public function testNameID(): void
     {
         $state = [
-            'saml:NameID' => ['Value' => 'user@example.org', 'Format' => Constants::NAMEID_UNSPECIFIED]
+            'saml:NameID' => ['value' => 'user@example.org', 'Format' => C::NAMEID_UNSPECIFIED]
         ];
 
         $ar = $this->createAuthnRequest($state);
 
-        /** @var \SAML2\XML\saml\NameID $nameID */
+        /** @var \SimpleSAML\SAML2\XML\saml\NameID $nameID */
         $nameID = $ar->getNameId();
-        $this->assertEquals($state['saml:NameID']['Value'], $nameID->getValue());
+        $this->assertEquals($state['saml:NameID']['value'], $nameID->getContent());
         $this->assertEquals($state['saml:NameID']['Format'], $nameID->getFormat());
 
         $xml = $ar->toSignedXML();
 
+        $xpCache = XPath::getXPath($xml);
         /** @var \DOMAttr[] $q */
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/saml:Subject/saml:NameID/@Format');
+        $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/saml:Subject/saml:NameID/@Format', $xpCache);
         $this->assertEquals(
             $state['saml:NameID']['Format'],
             $q[0]->value
         );
 
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/saml:Subject/saml:NameID');
+        $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/saml:Subject/saml:NameID', $xpCache);
         $this->assertEquals(
-            $state['saml:NameID']['Value'],
+            $state['saml:NameID']['value'],
             $q[0]->textContent
         );
     }
@@ -234,23 +236,27 @@ class SPTest extends ClearStateTestCase
     public function testAuthnContextClassRef(): void
     {
         $state = [
-            'saml:AuthnContextClassRef' => 'http://example.com/myAuthnContextClassRef'
+            'saml:AuthnContextClassRef' => new AuthnContextClassRef('http://example.com/myAuthnContextClassRef')
         ];
 
         $ar = $this->createAuthnRequest($state);
 
-        /** @var array $a */
         $a = $ar->getRequestedAuthnContext();
         $this->assertEquals(
-            $state['saml:AuthnContextClassRef'],
-            $a['AuthnContextClassRef'][0]
+            ($state['saml:AuthnContextClassRef'])->getContent(),
+            $a->getRequestedAuthnContexts()[0]->getContent(),
         );
 
         $xml = $ar->toSignedXML();
 
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/samlp:RequestedAuthnContext/saml:AuthnContextClassRef');
+        $xpCache = XPath::getXPath($xml);
+        $q = XPath::xpQuery(
+            $xml,
+            '/samlp:AuthnRequest/samlp:RequestedAuthnContext/saml:AuthnContextClassRef',
+            $xpCache,
+        );
         $this->assertEquals(
-            $state['saml:AuthnContextClassRef'],
+            ($state['saml:AuthnContextClassRef'])->getContent(),
             $q[0]->textContent
         );
     }
@@ -276,8 +282,9 @@ class SPTest extends ClearStateTestCase
 
         $xml = $ar->toSignedXML();
 
+        $xpCache = XPath::getXPath($xml);
         /** @var \DOMAttr[] $q */
-        $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/@ForceAuthn');
+        $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/@ForceAuthn', $xpCache);
         $this->assertEquals(
             $state['ForceAuthn'] ? 'true' : 'false',
             $q[0]->value
@@ -297,8 +304,10 @@ class SPTest extends ClearStateTestCase
 
         $info = ['AuthId' => 'default-sp'];
         $config = ['entityID' => 'urn:x-simplesamlphp:example-sp'];
+
+        $request = Request::createFromGlobals();
         $as = new SpTester($info, $config);
-        $as->authenticate($state);
+        $as->authenticate($request, $state);
     }
 
 
@@ -325,8 +334,10 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'idp' => 'https://engine.surfconext.nl/authentication/idp/metadata'
         ];
+
+        $request = Request::createFromGlobals();
         $as = new SpTester($info, $config);
-        $as->authenticate($state);
+        $as->authenticate($request, $state);
     }
 
 
@@ -352,9 +363,11 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'idp' => $entityId
         ];
+
         $as = new SpTester($info, $config);
+        $request = Request::createFromGlobals();
         try {
-            $as->authenticate($state);
+            $as->authenticate($request, $state);
             $this->fail('Expected ExitTestException');
         } catch (ExitTestException $e) {
             $r = $e->getTestResult();
@@ -362,8 +375,9 @@ class SPTest extends ClearStateTestCase
             $ar = $r['ar'];
             $xml = $ar->toSignedXML();
 
+            $xpCache = XPath::getXPath($xml);
             /** @var \DOMAttr[] $q */
-            $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/@Destination');
+            $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/@Destination', $xpCache);
             $this->assertEquals(
                 'https://saml.idp/sso/',
                 $q[0]->value
@@ -392,8 +406,9 @@ class SPTest extends ClearStateTestCase
         $info = ['AuthId' => 'default-sp'];
         $config = ['entityID' => 'urn:x-simplesamlphp:example-sp'];
         $as = new SpTester($info, $config);
+        $request = Request::createFromGlobals();
         try {
-            $as->authenticate($state);
+            $as->authenticate($request, $state);
             $this->fail('Expected ExitTestException');
         } catch (ExitTestException $e) {
             $r = $e->getTestResult();
@@ -401,8 +416,9 @@ class SPTest extends ClearStateTestCase
             $ar = $r['ar'];
             $xml = $ar->toSignedXML();
 
+            $xpCache = XPath::getXPath($xml);
             /** @var \DOMAttr[] $q */
-            $q = Utils::xpQuery($xml, '/samlp:AuthnRequest/@Destination');
+            $q = XPath::xpQuery($xml, '/samlp:AuthnRequest/@Destination', $xpCache);
             $this->assertEquals(
                 'https://saml.idp/sso/',
                 $q[0]->value
@@ -440,10 +456,12 @@ class SPTest extends ClearStateTestCase
             // otherwise it will call exit
             'discoURL' => 'smtp://invalidurl'
         ];
+
         // Http redirect util library requires a request_uri to be set.
+        $request = Request::createFromGlobals();
         $_SERVER['REQUEST_URI'] = 'https://l.example.com/';
         $as = new SpTester($info, $config);
-        $as->authenticate($state);
+        $as->authenticate($request, $state);
     }
 
     /**
@@ -480,12 +498,12 @@ class SPTest extends ClearStateTestCase
     public function testSPIdpListScoping(): void
     {
         $ar = $this->createAuthnRequest([
-            'IDPList' => ['https://scope.example.com']
+            'IDPList' => new IDPList([new IDPEntry('https://scope.example.com')]),
         ]);
 
         $this->assertContains(
-            'https://scope.example.com',
-            $ar->getIDPList()
+            (new IDPEntry('https://scope.example.com'))->toArray(),
+            ($ar->getScoping()->getIDPList()->toArray())['IDPEntry'],
         );
     }
 
@@ -499,8 +517,8 @@ class SPTest extends ClearStateTestCase
         $ar = $this->createAuthnRequest([]);
 
         $this->assertContains(
-            'https://scope.example.com',
-            $ar->getIDPList()
+            (new IDPEntry('https://scope.example.com'))->toArray(),
+            ($ar->getScoping()->getIDPList()->toArray())['IDPEntry'],
         );
     }
 
@@ -517,15 +535,15 @@ class SPTest extends ClearStateTestCase
         ];
         $as = new SpTester($info, $config);
 
-        /** @var \SAML2\AuthnRequest $ar */
+        /** @var \SimpleSAML\SAML2\AuthnRequest $ar */
         try {
             $as->startSSO2Test($this->getIdpMetadata(), []);
             $this->assertTrue(false, 'Expected ExitTestException');
         } catch (ExitTestException $e) {
             ['ar' => $ar] = $e->getTestResult();
             $this->assertContains(
-                'https://scope.example.com',
-                $ar->getIDPList()
+                (new IDPEntry('https://scope.example.com'))->toArray(),
+                ($ar->getScoping()->getIDPList()->toArray())['IDPEntry'],
             );
         }
     }
@@ -538,7 +556,7 @@ class SPTest extends ClearStateTestCase
      * @dataProvider getScopingOrders
      */
     public function testSPIdpListScopingOrder(
-        ?array $stateIdpList,
+        ?IDPList $stateIdpList,
         ?array $idpConfigArray,
         ?array $remoteMetadata,
         string $expectedScope
@@ -558,7 +576,7 @@ class SPTest extends ClearStateTestCase
 
         $as = new SpTester($info, $config);
 
-        /** @var \SAML2\AuthnRequest $ar */
+        /** @var \SimpleSAML\SAML2\AuthnRequest $ar */
         try {
             $as->startSSO2Test($this->getIdpMetadata(), $state);
             $this->assertTrue(false, 'Expected ExitTestException');
@@ -566,8 +584,8 @@ class SPTest extends ClearStateTestCase
             ['ar' => $ar] = $e->getTestResult();
 
             $this->assertContains(
-                $expectedScope,
-                $ar->getIDPList()
+                (new IDPEntry($expectedScope))->toArray(),
+                ($ar->getScoping()->getIDPList()->toArray())['IDPEntry'],
             );
         }
     }
@@ -576,34 +594,34 @@ class SPTest extends ClearStateTestCase
     {
         return [
             [
-                'stateIdpList' => ['https//scope1.example.com'],
-                'idpConfigArray' => ['https//scope2.example.com'],
-                'remoteMetadata' => ['https//scope3.example.com'],
-                'expectedScope' => 'https//scope1.example.com'
+                'stateIdpList' => new IDPList([new IDPEntry('https://scope1.example.com')]),
+                'idpConfigArray' => ['https://scope2.example.com'],
+                'remoteMetadata' => ['https://scope3.example.com'],
+                'expectedScope' => 'https://scope1.example.com'
             ],
             [
                 'stateIdpList' => null,
-                'idpConfigArray' => ['https//scope2.example.com'],
-                'remoteMetadata' => ['https//scope3.example.com'],
-                'expectedScope' => 'https//scope3.example.com'
+                'idpConfigArray' => ['https://scope2.example.com'],
+                'remoteMetadata' => ['https://scope3.example.com'],
+                'expectedScope' => 'https://scope3.example.com'
             ],
             [
                 'stateIdpList' => null,
                 'idpConfigArray' => null,
-                'remoteMetadata' => ['https//scope3.example.com'],
-                'expectedScope' => 'https//scope3.example.com'
+                'remoteMetadata' => ['https://scope3.example.com'],
+                'expectedScope' => 'https://scope3.example.com'
             ],
             [
-                'stateIdpList' => ['https//scope1.example.com'],
+                'stateIdpList' => new IDPList([new IDPEntry('https://scope1.example.com')]),
                 'idpConfigArray' => null,
-                'remoteMetadata' => ['https//scope3.example.com'],
-                'expectedScope' => 'https//scope1.example.com'
+                'remoteMetadata' => ['https://scope3.example.com'],
+                'expectedScope' => 'https://scope1.example.com'
             ],
             [
-                'stateIdpList' => ['https//scope1.example.com'],
-                'idpConfigArray' => ['https//scope2.example.com'],
+                'stateIdpList' => new IDPList([new IDPEntry('https://scope1.example.com')]),
+                'idpConfigArray' => ['https://scope2.example.com'],
                 'remoteMetadata' => null,
-                'expectedScope' => 'https//scope1.example.com'
+                'expectedScope' => 'https://scope1.example.com'
             ]
         ];
     }
@@ -633,21 +651,25 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                    'contactType'       => 'other',
-                    'emailAddress'      => 'csirt@example.com',
-                    'surName'           => 'CSIRT',
-                    'telephoneNumber'   => '+31SECOPS',
-                    'company'           => 'Acme Inc',
-                    'attributes'        => [
-                        'xmlns:remd'        => 'http://refeds.org/metadata',
-                        'remd:contactType'  => 'http://refeds.org/metadata/contactType/security',
+                    'ContactType'       => 'other',
+                    'EmailAddress'      => ['csirt@example.com'],
+                    'SurName'           => 'CSIRT',
+                    'TelephoneNumber'   => ['+31SECOPS'],
+                    'Company'           => 'Acme Inc',
+                    'attributes' => [
+                        [
+                            'namespaceURI' => 'http://refeds.org/metadata',
+                            'namespacePrefix' => 'remd',
+                            'attrName' => 'contactType',
+                            'attrValue' => 'http://refeds.org/metadata/contactType/security',
+                        ],
                     ],
                 ],
                 [
-                    'contactType'       => 'administrative',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'givenName'         => 'Jane',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'administrative',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'GivenName'         => 'Jane',
+                    'SurName'           => 'Doe',
                 ],
             ]
         ];
@@ -662,22 +684,26 @@ class SPTest extends ClearStateTestCase
         $contact = $md['contacts'][0];
 
         $this->assertIsArray($contact);
-        $this->assertEquals('other', $contact['contactType']);
-        $this->assertEquals('CSIRT', $contact['surName']);
-        $this->assertArrayNotHasKey('givenName', $contact);
-        $this->assertEquals('+31SECOPS', $contact['telephoneNumber']);
-        $this->assertEquals('Acme Inc', $contact['company']);
+        $this->assertEquals('other', $contact['ContactType']);
+        $this->assertEquals('CSIRT', $contact['SurName']);
+        $this->assertArrayNotHasKey('GivenName', $contact);
+        $this->assertEquals(['+31SECOPS'], $contact['TelephoneNumber']);
+        $this->assertEquals('Acme Inc', $contact['Company']);
         $this->assertIsArray($contact['attributes']);
         $attrs = [
-            'xmlns:remd' => 'http://refeds.org/metadata',
-            'remd:contactType' => 'http://refeds.org/metadata/contactType/security'
+            [
+                'namespaceURI' => 'http://refeds.org/metadata',
+                'namespacePrefix' => 'remd',
+                'attrName' => 'contactType',
+                'attrValue' => 'http://refeds.org/metadata/contactType/security',
+            ],
         ];
         $this->assertEquals($attrs, $contact['attributes']);
 
         $contact = $md['contacts'][1];
         $this->assertIsArray($contact);
-        $this->assertEquals('administrative', $contact['contactType']);
-        $this->assertEquals('j.doe@example.edu', $contact['emailAddress']);
+        $this->assertEquals('administrative', $contact['ContactType']);
+        $this->assertEquals(['mailto:j.doe@example.edu'], $contact['EmailAddress']);
         $this->assertArrayNotHasKey('attributes', $contact);
     }
 
@@ -697,10 +723,10 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                    'contactType'       => 'technical',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'givenName'         => 'Jane',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'technical',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'GivenName'         => 'Jane',
+                    'SurName'           => 'Doe',
                 ],
             ]
         ];
@@ -715,15 +741,15 @@ class SPTest extends ClearStateTestCase
         $contact = $md['contacts'][0];
 
         $this->assertIsArray($contact);
-        $this->assertEquals('technical', $contact['contactType']);
-        $this->assertEquals('Doe', $contact['surName']);
+        $this->assertEquals('technical', $contact['ContactType']);
+        $this->assertEquals('Doe', $contact['SurName']);
 
         $contact = $md['contacts'][1];
         $this->assertIsArray($contact);
-        $this->assertEquals('technical', $contact['contactType']);
-        $this->assertEquals('someone.somewhere@example.org', $contact['emailAddress']);
-        $this->assertEquals('Someone von Somewhere', $contact['givenName']);
-        $this->assertArrayNotHasKey('surName', $contact);
+        $this->assertEquals('technical', $contact['ContactType']);
+        $this->assertEquals(['mailto:someone.somewhere@example.org'], $contact['EmailAddress']);
+        $this->assertEquals('Someone von Somewhere', $contact['GivenName']);
+        $this->assertArrayNotHasKey('SurName', $contact);
     }
 
     /**
@@ -742,9 +768,9 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                    'contactType'       => 'technical',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'technical',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'SurName'           => 'Doe',
                 ],
             ]
         ];
@@ -752,7 +778,7 @@ class SPTest extends ClearStateTestCase
 
         $md = $as->getHostedMetadata();
         $this->assertCount(1, $md['contacts']);
-        $this->assertEquals('j.doe@example.edu', $md['contacts'][0]['emailAddress']);
+        $this->assertEquals(['mailto:j.doe@example.edu'], $md['contacts'][0]['EmailAddress']);
     }
 
     /**
@@ -766,17 +792,19 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                   'contactType'       => 'anything',
-                   'emailAddress'      => 'j.doe@example.edu',
-                   'givenName'         => 'Jane',
-                   'surName'           => 'Doe',
+                   'ContactType'       => 'anything',
+                   'EmailAddress'      => ['j.doe@example.edu'],
+                   'GivenName'         => 'Jane',
+                   'SurName'           => 'Doe',
                 ],
             ]
         ];
         $as = new SpTester($info, $config);
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('"contactType" is mandatory and must be one of');
+        $this->expectException(AssertionFailedException::class);
+        $this->expectExceptionMessage(
+            'Expected one of: "technical", "support", "administrative", "billing", "other". Got: "anything"',
+        );
 
         $md = $as->getHostedMetadata();
     }
@@ -792,10 +820,10 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                    'contactType'       => 'administrative',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'givenName'         => 'Jane',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'administrative',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'GivenName'         => 'Jane',
+                    'SurName'           => 'Doe',
                 ],
             ],
             'acs.Bindings' => ['urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST'],
@@ -821,10 +849,10 @@ class SPTest extends ClearStateTestCase
             'entityID' => 'urn:x-simplesamlphp:example-sp',
             'contacts' => [
                 [
-                    'contactType'       => 'administrative',
-                    'emailAddress'      => 'j.doe@example.edu',
-                    'givenName'         => 'Jane',
-                    'surName'           => 'Doe',
+                    'ContactType'       => 'administrative',
+                    'EmailAddress'      => ['j.doe@example.edu'],
+                    'GivenName'         => 'Jane',
+                    'SurName'           => 'Doe',
                 ],
             ],
             'acs.Bindings' => ['urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST', 'urn:this:doesnotexist'],
@@ -1393,7 +1421,7 @@ class SPTest extends ClearStateTestCase
         $this->assertIsArray($md['keys']);
         $this->assertCount(1, $md['keys']);
         $this->assertEquals('X509Certificate', $md['keys'][0]['type']);
-        $this->assertStringStartsWith('MIICxDCCAi2gAwIBAgIUCJ8EYI', $md['keys'][0]['X509Certificate']);
+        $this->assertStringStartsWith('MIICxDCCAi2gAwIBAgIUZ9QDx+', $md['keys'][0]['X509Certificate']);
         $this->assertTrue($md['keys'][0]['encryption']);
         $this->assertTrue($md['keys'][0]['signing']);
         $this->assertEquals('', $md['keys'][0]['prefix']);
@@ -1423,7 +1451,7 @@ class SPTest extends ClearStateTestCase
         $this->assertEquals('X509Certificate', $md['keys'][0]['type']);
         $this->assertEquals('X509Certificate', $md['keys'][1]['type']);
         $this->assertStringStartsWith('MIICeTCCAeICAQMwDQYJKoZIhv', $md['keys'][0]['X509Certificate']);
-        $this->assertStringStartsWith('MIICxDCCAi2gAwIBAgIUCJ8EYI', $md['keys'][1]['X509Certificate']);
+        $this->assertStringStartsWith('MIICxDCCAi2gAwIBAgIUZ9QDx+', $md['keys'][1]['X509Certificate']);
         $this->assertTrue($md['keys'][0]['encryption']);
         $this->assertTrue($md['keys'][0]['signing']);
         $this->assertFalse($md['keys'][1]['encryption']);
@@ -1485,8 +1513,7 @@ class SPTest extends ClearStateTestCase
     */
     public function testLogoutRequest(): void
     {
-        $nameId = new NameID();
-        $nameId->setValue('someone@example.com');
+        $nameId = new NameID('someone@example.com');
 
         $dom = DOMDocumentFactory::create();
         $extension = $dom->createElementNS('urn:some:namespace', 'MyLogoutExtension');
@@ -1499,7 +1526,7 @@ class SPTest extends ClearStateTestCase
                 ["type" => "xml", "xml" => $xml],
             ],
         ];
-        Configuration::loadFromArray($c, '', 'simplesaml');
+        $this->config = Configuration::loadFromArray($c, '', 'simplesaml');
 
         $state = [
             'saml:logout:IdP' => $entityId,
@@ -1510,17 +1537,18 @@ class SPTest extends ClearStateTestCase
 
         $lr = $this->createLogoutRequest($state);
 
-        /** @var \SAML2\XML\samlp\Extensions $extensions */
+        /** @var \SimpleSAML\SAML2\XML\samlp\Extensions $extensions */
         $extensions = $lr->getExtensions();
         $this->assertcount(1, $state['saml:logout:Extensions']);
 
         $xml = $lr->toSignedXML();
 
-        $q = Utils::xpQuery($xml, '/samlp:LogoutRequest/saml:NameID');
+        $xpCache = XPath::getXPath($xml);
+        $q = XPath::xpQuery($xml, '/samlp:LogoutRequest/saml:NameID', $xpCache);
         $this->assertCount(1, $q);
         $this->assertEquals('someone@example.com', $q[0]->nodeValue);
 
-        $q = Utils::xpQuery($xml, '/samlp:LogoutRequest/samlp:Extensions');
+        $q = XPath::xpQuery($xml, '/samlp:LogoutRequest/samlp:Extensions', $xpCache);
         $this->assertCount(1, $q);
         $this->assertCount(1, $q[0]->childNodes);
         $this->assertEquals('MyLogoutExtension', $q[0]->firstChild->localName);

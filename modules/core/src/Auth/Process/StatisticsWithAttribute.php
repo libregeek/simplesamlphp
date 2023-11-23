@@ -5,9 +5,13 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\core\Auth\Process;
 
 use Exception;
+use SimpleSAML\{Auth, Logger};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Logger;
+
+use function array_key_exists;
+use function boolval;
+use function is_null;
+use function is_string;
 
 /**
  * Log a line in the STAT log with one attribute.
@@ -44,21 +48,20 @@ class StatisticsWithAttribute extends Auth\ProcessingFilter
         parent::__construct($config, $reserved);
 
         if (array_key_exists('attributename', $config)) {
+            Assert::stringNotEmpty(
+                $config['attributename'],
+                'Invalid attribute name given to core:StatisticsWithAttribute filter.',
+            );
             $this->attribute = $config['attributename'];
-            if (!is_string($this->attribute)) {
-                throw new Exception('Invalid attribute name given to core:StatisticsWithAttribute filter.');
-            }
         }
 
         if (array_key_exists('type', $config)) {
+            Assert::stringNotEmpty($config['type'], 'Invalid typeTag given to core:StatisticsWithAttribute filter.');
             $this->typeTag = $config['type'];
-            if (!is_string($this->typeTag)) {
-                throw new Exception('Invalid typeTag given to core:StatisticsWithAttribute filter.');
-            }
         }
 
         if (array_key_exists('skipPassive', $config)) {
-            $this->skipPassive = (bool) $config['skipPassive'];
+            $this->skipPassive = boolval($config['skipPassive']);
         }
     }
 

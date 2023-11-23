@@ -6,6 +6,8 @@ namespace SimpleSAML\Auth;
 
 use SimpleSAML\Assert\Assert;
 
+use function array_key_exists;
+
 /**
  * Base class for authentication processing filters.
  *
@@ -36,6 +38,13 @@ abstract class ProcessingFilter
      */
     public int $priority = 50;
 
+    /**
+     * The condition to run this filter.
+     *
+     * Used to control whether or not to run this filter.
+     */
+    public string $precondition = 'return true;';
+
 
     /**
      * Constructor for a processing filter.
@@ -46,12 +55,36 @@ abstract class ProcessingFilter
      * @param array &$config  Configuration for this filter.
      * @param mixed $reserved  For future use.
      */
-    public function __construct(array &$config, /** @scrutinizer ignore-unused */ $reserved)
+    public function __construct(array &$config, /** @scrutinizer ignore-unused */ mixed $reserved)
     {
         if (array_key_exists('%priority', $config)) {
             $this->priority = $config['%priority'];
             unset($config['%priority']);
         }
+
+        if (array_key_exists('%precondition', $config)) {
+            $this->precondition = $config['%precondition'];
+            unset($config['%precondition']);
+        }
+    }
+
+
+    /**
+     * Test whether or not this filter must run.
+     *
+     * @param array &$state  The request we are currently processing.
+     * @return bool
+     */
+    public function checkPrecondition(array &$state): bool
+    {
+        $function = /** @return bool */ function (
+            array &$attributes,
+            array &$state
+        ) {
+            return eval($this->precondition);
+        };
+
+        return $function($state['Attributes'], $state) === true;
     }
 
 

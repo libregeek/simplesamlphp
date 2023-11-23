@@ -4,12 +4,16 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\saml\Auth\Process;
 
-use SAML2\Constants;
+use SimpleSAML\{Error, Logger, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Error;
-use SimpleSAML\Logger;
 use SimpleSAML\Module\saml\BaseNameIDGenerator;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Constants as C;
+
+use function array_values;
+use function count;
+use function sha1;
+use function strlen;
+use function var_export;
 
 /**
  * Authentication processing filter to generate a persistent NameID.
@@ -39,7 +43,7 @@ class PersistentNameID extends BaseNameIDGenerator
     {
         parent::__construct($config, $reserved);
 
-        $this->format = Constants::NAMEID_PERSISTENT;
+        $this->format = C::NAMEID_PERSISTENT;
 
         if (!isset($config['identifyingAttribute'])) {
             throw new Error\Exception("PersistentNameID: Missing required option 'identifyingAttribute'.");

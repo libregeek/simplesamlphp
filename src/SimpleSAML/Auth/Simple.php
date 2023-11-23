@@ -4,12 +4,17 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Auth;
 
+use SimpleSAML\{Configuration, Error, Module, Session, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Module;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use Symfony\Component\HttpFoundation\Response;
+
+use function array_key_exists;
+use function call_user_func;
+use function get_class;
+use function is_string;
+use function parse_url;
+use function trim;
+use function urlencode;
 
 /**
  * Helper class for simple authentication applications.
@@ -19,13 +24,6 @@ use SimpleSAML\Utils;
 
 class Simple
 {
-    /**
-     * The id of the authentication source we are accessing.
-     *
-     * @var string
-     */
-    protected string $authSource;
-
     /** @var \SimpleSAML\Configuration */
     protected Configuration $app_config;
 
@@ -40,12 +38,14 @@ class Simple
      * @param \SimpleSAML\Configuration|null $config Optional configuration to use.
      * @param \SimpleSAML\Session|null $session Optional session to use.
      */
-    public function __construct(string $authSource, Configuration $config = null, Session $session = null)
-    {
+    public function __construct(
+        protected string $authSource,
+        Configuration $config = null,
+        Session $session = null
+    ) {
         if ($config === null) {
             $config = Configuration::getInstance();
         }
-        $this->authSource = $authSource;
         $this->app_config = $config->getOptionalConfigItem('application', []);
 
         if ($session === null) {
@@ -99,14 +99,14 @@ class Simple
      *
      * @param array $params Various options to the authentication request. See the documentation.
      */
-    public function requireAuth(array $params = []): void
+    public function requireAuth(array $params = []): ?Response
     {
         if ($this->session->isValid($this->authSource)) {
             // Already authenticated
-            return;
+            return null;
         }
 
-        $this->login($params);
+        return $this->login($params);
     }
 
 
@@ -120,11 +120,9 @@ class Simple
      *  - 'ReturnTo': The URL the user should be returned to after authentication.
      *  - 'ReturnCallback': The function we should call after the user has finished authentication.
      *
-     * Please note: this function never returns.
-     *
      * @param array $params Various options to the authentication request.
      */
-    public function login(array $params = []): void
+    public function login(array $params = []): Response
     {
         if (array_key_exists('KeepPost', $params)) {
             $keepPost = (bool) $params['KeepPost'];
@@ -167,8 +165,8 @@ class Simple
             $params[State::RESTART] = $restartURL;
         }
 
-        $as->initLogin($returnTo, $errorURL, $params);
-        Assert::true(false);
+        $as = $this->getAuthSource();
+        return $as->initLogin($returnTo, $errorURL, $params);
     }
 
 
@@ -187,10 +185,8 @@ class Simple
      * @param string|array|null $params Either the URL the user should be redirected to after logging out, or an array
      * with parameters for the logout. If this parameter is null, we will return to the current page.
      */
-    public function logout($params = null): void
+    public function logout(string|array|null $params = null): Response
     {
-        Assert::true(is_array($params) || is_string($params) || $params === null);
-
         if ($params === null) {
             $httpUtils = new Utils\HTTP();
             $params = $httpUtils->getSelfURL();
@@ -221,11 +217,14 @@ class Simple
 
             $as = Source::getById($this->authSource);
             if ($as !== null) {
-                $as->logout($params);
+                $response = $as->logout($params);
+                if ($response instanceof Response) {
+                    return $response;
+                }
             }
         }
 
-        self::logoutCompleted($params);
+        return self::logoutCompleted($params);
     }
 
 
@@ -236,13 +235,13 @@ class Simple
      *
      * @param array $state The state after the logout.
      */
-    public static function logoutCompleted(array $state): void
+    public static function logoutCompleted(array $state): Response
     {
         Assert::true(isset($state['ReturnTo']) || isset($state['ReturnCallback']));
 
         if (isset($state['ReturnCallback'])) {
-            call_user_func($state['ReturnCallback'], $state);
-            Assert::true(false);
+            $response = call_user_func($state['ReturnCallback'], $state);
+            Assert::isInstanceOf($response, Response::class);
         } else {
             $params = [];
             if (isset($state['ReturnStateParam']) || isset($state['ReturnStateStage'])) {
@@ -251,8 +250,10 @@ class Simple
                 $params[$state['ReturnStateParam']] = $stateID;
             }
             $httpUtils = new Utils\HTTP();
-            $httpUtils->redirectTrustedURL($state['ReturnTo'], $params);
+            $response = $httpUtils->redirectTrustedURL($state['ReturnTo'], $params);
         }
+
+        return $response;
     }
 
 
@@ -283,7 +284,7 @@ class Simple
      *
      * @return mixed|null The value of the parameter, or null if it isn't found or we are unauthenticated.
      */
-    public function getAuthData(string $name)
+    public function getAuthData(string $name): mixed
     {
         if (!$this->isAuthenticated()) {
             return null;
@@ -373,9 +374,8 @@ class Simple
 
         $scheme = parse_url($url, PHP_URL_SCHEME);
         $host = parse_url($url, PHP_URL_HOST) ?: $httpUtils->getSelfHost();
-        $port = parse_url($url, PHP_URL_PORT) ?: (
-            $scheme ? '' : ltrim($httpUtils->getServerPort(), ':')
-        );
+        $port = parse_url($url, PHP_URL_PORT) ?:
+            ($scheme ? '' : ltrim($httpUtils->getServerPort(), ':'));
         $scheme = $scheme ?: ($httpUtils->getServerHTTPS() ? 'https' : 'http');
         $path = parse_url($url, PHP_URL_PATH) ?: '/';
         $query = parse_url($url, PHP_URL_QUERY) ?: '';

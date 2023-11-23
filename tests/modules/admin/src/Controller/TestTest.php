@@ -5,17 +5,11 @@ declare(strict_types=1);
 namespace SimpleSAML\Test\Module\admin\Controller;
 
 use PHPUnit\Framework\TestCase;
-use SAML2\XML\saml\NameID;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
+use SimpleSAML\{Auth, Configuration, Error, Session, Utils};
 use SimpleSAML\Module\admin\Controller\Test as TestController;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\XML\saml\NameID;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{RedirectResponse, Request, Response};
 
 /**
  * Set of tests for the controllers in the "admin" module.
@@ -51,9 +45,10 @@ class TestTest extends TestCase
         );
 
         $this->authUtils = new class () extends Utils\Auth {
-            public function requireAdmin(): void
+            public function requireAdmin(): ?Response
             {
                 // stub
+                return null;
             }
         };
 
@@ -105,17 +100,11 @@ class TestTest extends TestCase
 
         $c = new TestController($this->config, $this->session);
         $c->setAuthUtils($this->authUtils);
-        $c->setAuthSimple(new class ('admin') extends Auth\Simple {
-            public function logout($params = null): void
-            {
-                // stub
-            }
-        });
 
         $response = $c->main($request, 'admin');
 
-        $this->assertInstanceOf(RunnableResponse::class, $response);
-        $this->assertTrue($response->isSuccessful());
+        $this->assertInstanceOf(RedirectResponse::class, $response);
+        $this->assertTrue($response->isRedirection());
     }
 
 
@@ -157,7 +146,7 @@ class TestTest extends TestCase
         });
 
         $this->expectException(Error\NoState::class);
-        $this->expectExceptionMessage('NOSTATE');
+        $this->expectExceptionMessage(Error\ErrorCodes::NOSTATE);
         $c->main($request, 'admin');
     }
 
@@ -166,6 +155,7 @@ class TestTest extends TestCase
      */
     public function testMainWithAuthSourceNotAuthenticated(): void
     {
+        $_SERVER['REQUEST_METHOD'] = 'GET';
         $_SERVER['REQUEST_URI'] = '/module.php/admin/test';
         $request = Request::create(
             '/test',
@@ -180,17 +170,12 @@ class TestTest extends TestCase
             {
                 return false;
             }
-
-            public function login(array $params = []): void
-            {
-                // stub
-            }
         });
 
         $response = $c->main($request, 'admin');
 
-        $this->assertInstanceOf(RunnableResponse::class, $response);
-        $this->assertTrue($response->isSuccessful());
+        $this->assertInstanceOf(RedirectResponse::class, $response);
+        $this->assertTrue($response->isRedirection());
     }
 
 
@@ -214,12 +199,13 @@ class TestTest extends TestCase
 
             public function getAttributes(): array
             {
-                $nameId = new NameID();
-                $nameId->setValue('_b806c4f98188b42e48d3eb5444db613dbde463e2e8');
-                $nameId->setSPProvidedID('some:entity');
-                $nameId->setNameQualifier('some name qualifier');
-                $nameId->setSPNameQualifier('some SP name qualifier');
-                $nameId->setFormat('urn:oasis:names:tc:SAML:2.0:nameid-format:transient');
+                $nameId = new NameID(
+                    value: '_b806c4f98188b42e48d3eb5444db613dbde463e2e8',
+                    SPProvidedID: 'some:entity',
+                    NameQualifier: 'some name qualifier',
+                    SPNameQualifier: 'some SP name qualifier',
+                    Format: 'urn:oasis:names:tc:SAML:2.0:nameid-format:transient',
+                );
 
                 /** @psalm-suppress PossiblyNullPropertyFetch */
                 return [
@@ -256,14 +242,15 @@ class TestTest extends TestCase
                 return [];
             }
 
-            public function getAuthData(string $name)
+            public function getAuthData(string $name): mixed
             {
-                $nameId = new NameID();
-                $nameId->setValue('_b806c4f98188b42e48d3eb5444db613dbde463e2e8');
-                $nameId->setSPProvidedID('some:entity');
-                $nameId->setNameQualifier('some name qualifier');
-                $nameId->setSPNameQualifier('some SP name qualifier');
-                $nameId->setFormat('urn:oasis:names:tc:SAML:2.0:nameid-format:transient');
+                $nameId = new NameID(
+                    value: '_b806c4f98188b42e48d3eb5444db613dbde463e2e8',
+                    SPProvidedID: 'some:entity',
+                    NameQualifier: 'some name qualifier',
+                    SPNameQualifier: 'some SP name qualifier',
+                    Format: 'urn:oasis:names:tc:SAML:2.0:nameid-format:transient',
+                );
 
                 return $nameId;
             }

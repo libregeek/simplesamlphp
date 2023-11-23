@@ -4,16 +4,18 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\core\Controller;
 
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Logger;
-use SimpleSAML\Module;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use DateTimeInterface;
+use SimpleSAML\Assert\Assert;
+use SimpleSAML\{Auth, Configuration, Error, Logger, Module, Session, Utils};
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{RedirectResponse, Request, Response};
+
+use function array_keys;
+use function date;
+use function implode;
+use function intval;
+use function strval;
+use function urlencode;
 
 /**
  * Controller class for the core module.
@@ -24,11 +26,7 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class Exception
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
-    /** @var \SimpleSAML\Session */
-    protected Session $session;
+    public const CODES = ['IDENTIFICATION_FAILURE', 'AUTHENTICATION_FAILURE', 'AUTHORIZATION_FAILURE', 'OTHER_ERROR'];
 
 
     /**
@@ -42,11 +40,68 @@ class Exception
      * @throws \Exception
      */
     public function __construct(
-        Configuration $config,
-        Session $session
+        protected Configuration $config,
+        protected Session $session
     ) {
-        $this->config = $config;
-        $this->session = $session;
+    }
+
+
+    /**
+     * Show Service Provider error.
+     *
+     * @param Request $request The request that lead to this login operation.
+     * @param string $code The error code
+     * @return \SimpleSAML\XHTML\Template  An HTML template
+     */
+    public function error(Request $request, string $code): Response
+    {
+        if ($code !== 'ERRORURL_CODE') {
+            Assert::oneOf($code, self::CODES);
+        }
+
+        $ts = $request->query->get('ts');
+        $rp = $request->query->get('rp');
+        $tid = $request->query->get('tid');
+        $ctx = $request->query->get('ctx');
+
+        if ($ts !== 'ERRORURL_TS') {
+            Assert::integerish($ts);
+            $ts = date(DateTimeInterface::W3C, intval($ts));
+        } else {
+            $ts = null;
+        }
+
+        if ($rp === 'ERRORURL_RP') {
+            $rp = null;
+        }
+
+        if ($tid === 'ERRORURL_TID') {
+            $tid = null;
+        }
+
+        if ($ctx === 'ERRORURL_CTX') {
+            $ctx = null;
+        }
+
+        Logger::notice(sprintf(
+            "A Service Provider reported the following error during authentication:  "
+            . "Code: %s; Timestamp: %s; Relying party: %s; Transaction ID: %s; Context: [%s]",
+            $code,
+            $ts ?? 'null',
+            $rp ?? 'null',
+            $tid ?? 'null',
+            $ctx,
+        ));
+
+        $t = new Template($this->config, 'core:error.twig');
+
+        $t->data['code'] = $code;
+        $t->data['ts'] = $ts;
+        $t->data['rp'] = $rp;
+        $t->data['tid'] = $tid;
+        $t->data['ctx'] = $ctx;
+
+        return $t;
     }
 
 
@@ -55,8 +110,7 @@ class Exception
      *
      * @param Request $request The request that lead to this login operation.
      * @throws \SimpleSAML\Error\BadRequest
-     * @return \SimpleSAML\XHTML\Template|\Symfony\Component\HttpFoundation\RedirectResponse
-     *   An HTML template or a redirection if we are not authenticated.
+     * @return \SimpleSAML\XHTML\Template  An HTML template
      */
     public function cardinality(Request $request): Response
     {
@@ -91,7 +145,7 @@ class Exception
      * @return \SimpleSAML\XHTML\Template|\Symfony\Component\HttpFoundation\RedirectResponse
      *   An HTML template or a redirection if we are not authenticated.
      */
-    public function nocookie(Request $request): Response
+    public function nocookie(Request $request): Template|RedirectResponse
     {
         $retryURL = $request->query->get('retryURL', null);
         if ($retryURL !== null) {
@@ -112,12 +166,12 @@ class Exception
      *
      * @param Request $request The request that lead to this login operation.
      *
-     * @return \SimpleSAML\XHTML\Template|\SimpleSAML\HTTP\RunnableResponse|\Symfony\Component\HttpFoundation\RedirectResponse
+     * @return \SimpleSAML\XHTML\Template|\Symfony\Component\HttpFoundation\Response
      * An HTML template, a redirect or a "runnable" response.
      *
      * @throws \SimpleSAML\Error\BadRequest
      */
-    public function shortSsoInterval(Request $request): Response
+    public function shortSsoInterval(Request $request): Template|Response
     {
         $stateId = $request->query->get('StateId', false);
         if ($stateId === false) {
@@ -129,7 +183,7 @@ class Exception
         $continue = $request->query->get('continue', false);
         if ($continue !== false) {
             // The user has pressed the continue/retry-button
-            Auth\ProcessingChain::resumeProcessing($state);
+            return Auth\ProcessingChain::resumeProcessing($state);
         }
 
         $t = new Template($this->config, 'core:short_sso_interval.twig');

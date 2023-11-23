@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Error;
 
+use function dirname;
+use function str_replace;
+
 /**
  * This exception represents a configuration error.
  *
@@ -38,7 +41,7 @@ class ConfigurationError extends Error
     {
         $file_str = '';
         $reason_str = '.';
-        $params = ['CONFIG'];
+        $params = [ErrorCodes::CONFIG];
         if ($file !== null) {
             $params['%FILE%'] = $file;
             $basepath = dirname(__FILE__, 4) . '/';

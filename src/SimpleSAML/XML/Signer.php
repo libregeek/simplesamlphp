@@ -16,8 +16,7 @@ use DOMComment;
 use DOMElement;
 use DOMText;
 use Exception;
-use RobRichards\XMLSecLibs\XMLSecurityDSig;
-use RobRichards\XMLSecLibs\XMLSecurityKey;
+use RobRichards\XMLSecLibs\{XMLSecurityDSig, XMLSecurityKey};
 use SimpleSAML\Assert\Assert;
 use SimpleSAML\Utils;
 use Symfony\Component\Filesystem\Filesystem;
@@ -35,7 +34,7 @@ class Signer
     /**
      * @var \RobRichards\XMLSecLibs\XMLSecurityKey|false  The private key (as an XMLSecurityKey).
      */
-    private $privateKey = false;
+    private XMLSecurityKey|false $privateKey = false;
 
     /**
      * @var string The certificate (as text).
@@ -183,6 +182,7 @@ class Signer
      * @param bool $full_path  Whether the filename found in the configuration contains the
      *                         full path to the private key or not. Default to false.
      * @throws \Exception
+     * @throws \Symfony\Component\HttpFoundation\File\Exception\FileException
      */
     public function loadCertificate(string $file, bool $full_path = false): void
     {
@@ -198,11 +198,7 @@ class Signer
         }
 
         $file = new File($certFile);
-        $cert = $file->getContent();
-        if ($cert === false) {
-            throw new Exception('Unable to read certificate file "' . $certFile . '".');
-        }
-        $this->certificate = $cert;
+        $this->certificate = $file->getContent();
     }
 
 
@@ -254,10 +250,11 @@ class Signer
      *  in which case the signature will be appended to the element specified in $insertInto.
      * @throws \Exception
      */
-    public function sign(DOMElement $node, DOMElement $insertInto, $insertBefore = null): void
-    {
-        Assert::nullOrIsInstanceOfAny($insertBefore, [DOMElement::class, DOMComment::class, DOMText::class]);
-
+    public function sign(
+        DOMElement $node,
+        DOMElement $insertInto,
+        DOMElement|DOMComment|DOMText|null $insertBefore = null
+    ): void {
         $privateKey = $this->privateKey;
         if ($privateKey === false) {
             throw new Exception('Private key not set.');

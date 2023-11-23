@@ -4,9 +4,17 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Metadata;
 
+use Exception;
+use SimpleSAML\{Configuration, Database, Error};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Database;
-use SimpleSAML\Error;
+
+use function array_key_exists;
+use function count;
+use function in_array;
+use function json_decode;
+use function json_last_error;
+use function str_replace;
+use function var_export;
 
 /**
  * Class for handling metadata files stored in a database.
@@ -60,8 +68,12 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
      *
      * @param array $config An associative array with the configuration for this handler.
      */
-    public function __construct(/** @scrutinizer ignore-unused */ array $config)
-    {
+    public function __construct(
+        /** @scrutinizer ignore-unused */ Configuration $globalConfig,
+        /** @scrutinizer ignore-unused */ array $config,
+    ) {
+        parent::__construct();
+
         $this->db = Database::getInstance();
     }
 
@@ -103,7 +115,7 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
 
             return $metadata;
         } else {
-            throw new \Exception(
+            throw new Exception(
                 'PDO metadata handler: Database error: ' . var_export($this->db->getLastError(), true)
             );
         }
@@ -166,7 +178,7 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
 
         // throw pdo exception upon execution failure
         if (!$stmt->execute()) {
-            throw new \Exception(
+            throw new Exception(
                 'PDO metadata handler: Database error: ' . var_export($this->db->getLastError(), true)
             );
         }
@@ -176,7 +188,7 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
         while ($d = $stmt->fetch()) {
             $data = json_decode($d['entity_data'], true);
             if (json_last_error() != JSON_ERROR_NONE) {
-                throw new \SimpleSAML\Error\Exception(
+                throw new Error\Exception(
                     "Cannot decode metadata for entity '${d['entity_id']}'"
                 );
             }
@@ -244,6 +256,31 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
 
 
     /**
+     * Remove metadata from the configured database
+     *
+     * @param string $entityId The entityId we are removing.
+     * @param string $set The set to remove the metadata from.
+     *
+     * @return bool True/False if entry was successfully deleted
+     */
+    public function removeEntry(string $entityId, string $set): bool
+    {
+        if (!in_array($set, $this->supportedSets, true)) {
+            return false;
+        }
+
+        $tableName = $this->getTableName($set);
+
+        $rows = $this->db->write(
+            "DELETE FROM $tableName WHERE entity_id = :entity_id",
+            ['entity_id' => $entityId]
+        );
+
+        return $rows === 1;
+    }
+
+
+    /**
      * Replace the -'s to an _ in table names for Metadata sets
      * since SQL does not allow a - in a table name.
      *
@@ -262,7 +299,7 @@ class MetaDataStorageHandlerPdo extends MetaDataStorageSource
      *
      * @return int|false The number of SQL statements successfully executed, false if some error occurred.
      */
-    public function initDatabase()
+    public function initDatabase(): int|false
     {
         $stmt = 0;
         $fine = true;

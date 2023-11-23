@@ -11,9 +11,8 @@ use DOMException;
 use DOMText;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\Utils;
+use SimpleSAML\{Configuration, Error, Utils};
+use SimpleSAML\XML\DOMDocumentFactory;
 
 /**
  * Tests for SimpleSAML\Utils\XML.
@@ -291,12 +290,11 @@ NOWDOC;
     {
         $xmlUtils = new Utils\XML();
 
+        $dom = DOMDocumentFactory::fromFile(
+            self::FRAMEWORK . '/metadata/valid-metadata-selfsigned.xml',
+        );
+
         $schema = 'saml-schema-metadata-2.0.xsd';
-        $xml = file_get_contents(self::FRAMEWORK . '/metadata/valid-metadata-selfsigned.xml');
-
-        $dom = new DOMDocument('1.0');
-        $dom->loadXML($xml, LIBXML_NONET);
-
         $res = $xmlUtils->isValid($dom, $schema);
         $this->assertTrue($res === true);
     }

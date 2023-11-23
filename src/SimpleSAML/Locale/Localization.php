@@ -12,24 +12,18 @@ namespace SimpleSAML\Locale;
 
 use Exception;
 use Gettext\Generator\ArrayGenerator;
-use Gettext\Loader\PoLoader;
-use Gettext\Translations;
-use Gettext\Translator;
-use Gettext\TranslatorFunctions;
-use SimpleSAML\Configuration;
-use SimpleSAML\Logger;
-use Symfony\Component\Filesystem\Filesystem;
+use Gettext\Loader\MoLoader;
+use Gettext\{Translations, Translator, TranslatorFunctions};
+use SimpleSAML\{Configuration, Logger};
 use Symfony\Component\HttpFoundation\File\File;
+
+use function explode;
+use function is_dir;
+use function is_readable;
+use function sprintf;
 
 class Localization
 {
-    /**
-     * The configuration to use.
-     *
-     * @var \SimpleSAML\Configuration
-     */
-    private Configuration $configuration;
-
     /**
      * The default gettext domain.
      *
@@ -72,23 +66,17 @@ class Localization
      */
     private string $langcode;
 
-    /**
-     * @var \Symfony\Component\Filesystem\Filesystem
-     */
-    private Filesystem $fileSystem;
-
 
     /**
      * Constructor
      *
      * @param \SimpleSAML\Configuration $configuration Configuration object
      */
-    public function __construct(Configuration $configuration)
-    {
-        $this->fileSystem = new Filesystem();
-        $this->configuration = $configuration;
+    public function __construct(
+        private Configuration $configuration
+    ) {
         /** @var string $locales */
-        $locales = $this->configuration->resolvePath('locales');
+        $locales = $configuration->resolvePath('locales');
         $this->localeDir = $locales;
         $this->language = new Language($configuration);
         $this->langcode = $this->language->getPosixLanguage($this->language->getLanguage());
@@ -249,9 +237,9 @@ class Localization
             }
         }
 
-        $file = new File($langPath . $domain . '.po', false);
-        if ($this->fileSystem->exists($file->getRealPath()) && $file->isReadable()) {
-            $translations = (new PoLoader())->loadFile($file->getRealPath());
+        $file = new File($langPath . $domain . '.mo', false);
+        if ($file->getRealPath() !== false && $file->isReadable()) {
+            $translations = (new MoLoader())->loadFile($file->getRealPath());
             $arrayGenerator = new ArrayGenerator();
             $this->translator->addTranslations(
                 $arrayGenerator->generateArray($translations)
@@ -268,7 +256,7 @@ class Localization
 
 
     /**
-     * Set up L18N if configured or fallback to old system
+     * Set up L18N
      */
     private function setupL10N(): void
     {

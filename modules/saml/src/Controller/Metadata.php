@@ -5,20 +5,13 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\saml\Controller;
 
 use Exception;
-use SimpleSAML\Configuration;
-use SimpleSAML\Error;
-use SimpleSAML\HTTP\RunnableResponse;
+use SimpleSAML\{Configuration, Error, Module, Utils};
 use SimpleSAML\Metadata as SSPMetadata;
 use SimpleSAML\Metadata\MetaDataStorageHandler;
-use SimpleSAML\Module;
 use SimpleSAML\Module\saml\IdP\SAML2 as SAML2_IdP;
-use SimpleSAML\Utils;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\{Request, Response};
 
-use function strpos;
-use function strrpos;
-use function substr;
+use function hash;
 
 /**
  * Controller class for the IdP metadata.
@@ -29,12 +22,10 @@ use function substr;
  */
 class Metadata
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /** @var \SimpleSAML\Utils\Auth */
     protected Utils\Auth $authUtils;
 
+    /** @var \SimpleSAML\Metadata\MetaDataStorageHandler */
     protected MetadataStorageHandler $mdHandler;
 
     /**
@@ -45,11 +36,10 @@ class Metadata
      * @param \SimpleSAML\Configuration $config The configuration to use by the controllers.
      */
     public function __construct(
-        Configuration $config
+        protected Configuration $config
     ) {
-        $this->config = $config;
         $this->authUtils = new Utils\Auth();
-        $this->mdHandler = MetaDataStorageHandler::getMetadataHandler();
+        $this->mdHandler = MetaDataStorageHandler::getMetadataHandler($config);
     }
 
     /**
@@ -74,17 +64,20 @@ class Metadata
      * This endpoint will offer the SAML 2.0 IdP metadata.
      *
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \SimpleSAML\HTTP\RunnableResponse|\Symfony\Component\HttpFoundation\Response
+     * @return \Symfony\Component\HttpFoundation\Response
      */
     public function metadata(Request $request): Response
     {
         if ($this->config->getBoolean('enable.saml20-idp') === false || !Module::isModuleEnabled('saml')) {
-            throw new Error\Error('NOACCESS', null, 403);
+            throw new Error\Error(Error\ErrorCodes::NOACCESS, null, 403);
         }
 
         // check if valid local session exists
         if ($this->config->getOptionalBoolean('admin.protectmetadata', false)) {
-            return new RunnableResponse([$this->authUtils, 'requireAdmin']);
+            $response = $this->authUtils->requireAdmin();
+            if ($response instanceof Response) {
+                return $response;
+            }
         }
 
         try {
@@ -104,14 +97,6 @@ class Metadata
             // sign the metadata if enabled
             $metaxml = SSPMetadata\Signer::sign($metaxml, $metaArray, 'SAML 2 IdP');
 
-            // make sure to export only the md:EntityDescriptor
-            $i = strpos($metaxml, '<md:EntityDescriptor');
-            $metaxml = substr($metaxml, $i ? $i : 0);
-
-            // 22 = strlen('</md:EntityDescriptor>')
-            $i = strrpos($metaxml, '</md:EntityDescriptor>');
-            $metaxml = substr($metaxml, 0, $i ? $i + 22 : 0);
-
             $response = new Response();
             $response->setEtag(hash('sha256', $metaxml));
             $response->setPublic();
@@ -124,7 +109,7 @@ class Metadata
 
             return $response;
         } catch (Exception $exception) {
-            throw new Error\Error('METADATA', $exception);
+            throw new Error\Error(Error\ErrorCodes::METADATA, $exception);
         }
     }
 }

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Test\Store;
 
-use PHPUnit\Framework\TestCase;
-use PHPUnit\Framework\MockObject\MockObject;
+use PHPUnit\Framework\{MockObject\MockObject, TestCase};
 use Predis\Client;
-use SimpleSAML\Configuration;
-use SimpleSAML\Store;
+use SimpleSAML\{Configuration, Store};
 use SimpleSAML\Store\StoreFactory;
+
+use function array_key_exists;
 
 /**
  * Tests for the Redis store.
@@ -113,6 +113,37 @@ class RedisStoreTest extends TestCase
         $this->assertInstanceOf(Store\RedisStore::class, $this->store);
     }
 
+    /**
+     * @test
+     */
+    public function testRedisInstanceWithInsecureTLS(): void
+    {
+        $config = Configuration::loadFromArray([
+            'store.type' => 'redis',
+            'store.redis.prefix' => 'phpunit_',
+            'store.redis.tls' => true,
+            'store.redis.insecure' => true,
+        ], '[ARRAY]', 'simplesaml');
+
+        $this->assertInstanceOf(Store\RedisStore::class, $this->store);
+    }
+
+    /**
+     * @test
+     */
+    public function testRedisInstanceWithSecureTLS(): void
+    {
+        $config = Configuration::loadFromArray([
+            'store.type' => 'redis',
+            'store.redis.prefix' => 'phpunit_',
+            'store.redis.tls' => true,
+            'store.redis.ca_certificate' => '/tmp/ssl/pki_roots.crt.pem',
+            'store.redis.certificate' => '/tmp/ssl/phpunit.crt.pem',
+            'store.redis.privatekey' => '/tmp/ssl/phpunit.key.pem',
+        ], '[ARRAY]', 'simplesaml');
+
+        $this->assertInstanceOf(Store\RedisStore::class, $this->store);
+    }
 
     /**
      * @test
@@ -148,12 +179,12 @@ class RedisStoreTest extends TestCase
      */
     public function testRedisSentinelInstance(): void
     {
-        $config = Configuration::loadFromArray(array(
+        $config = Configuration::loadFromArray([
             'store.type' => 'redis',
             'store.redis.prefix' => 'phpunit_',
             'store.redis.mastergroup' => 'phpunit_mastergroup',
-            'store.redis.sentinels' => array('tcp://sentinel1', 'tcp://sentinel2', 'tcp://sentinel3'),
-        ), '[ARRAY]', 'simplesaml');
+            'store.redis.sentinels' => ['tcp://sentinel1', 'tcp://sentinel2', 'tcp://sentinel3'],
+        ], '[ARRAY]', 'simplesaml');
         $this->assertInstanceOf(Store\RedisStore::class, $this->store);
     }
 

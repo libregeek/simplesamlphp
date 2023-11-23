@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Utils;
 
+use Exception;
+use InvalidArgumentException;
 use PHPMailer\PHPMailer\PHPMailer;
+use SimpleSAML\{Configuration, Logger};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Logger;
 use SimpleSAML\XHTML\Template;
 
+use function array_map;
+use function intval;
+use function is_array;
+use function preg_replace;
+use function strtolower;
+
 /**
- * E-mailer class that can generate a formatted e-mail from array
- * input data.
+ * E-mailer class that can generate a formatted e-mail from array input data.
  *
  * @package SimpleSAMLphp
  */
@@ -27,12 +33,6 @@ class EMail
 
     /** @var \PHPMailer\PHPMailer\PHPMailer The mailer instance */
     private PHPMailer $mail;
-
-    /** @var string */
-    private string $txt_template;
-
-    /** @var string */
-    private string $html_template;
 
 
     /**
@@ -53,16 +53,13 @@ class EMail
         string $subject,
         string $from = null,
         string $to = null,
-        string $txt_template = 'mailtxt.twig',
-        string $html_template = 'mailhtml.twig'
+        private string $txt_template = 'mailtxt.twig',
+        private string $html_template = 'mailhtml.twig'
     ) {
         $this->mail = new PHPMailer(true);
         $this->mail->Subject = $subject;
         $this->mail->setFrom($from ?: $this->getDefaultMailAddress());
         $this->mail->addAddress($to ?: $this->getDefaultMailAddress());
-
-        $this->txt_template = $txt_template;
-        $this->html_template = $html_template;
 
         $this->initFromConfig($this);
     }
@@ -84,7 +81,7 @@ class EMail
         $address = $config->getOptionalString('technicalcontact_email', 'na@example.org');
         $address = preg_replace('/^mailto:/i', '', $address);
         if ('na@example.org' === $address) {
-            throw new \Exception('technicalcontact_email must be changed from the default value');
+            throw new Exception('technicalcontact_email must be changed from the default value');
         }
         return $address;
     }
@@ -181,7 +178,7 @@ class EMail
                     $this->mail->Host = $transportOptions['host'];
                 } else {
                     // throw an exception otherwise
-                    throw new \InvalidArgumentException("Missing Required Email Transport Parameter 'host'");
+                    throw new InvalidArgumentException("Missing Required Email Transport Parameter 'host'");
                 }
 
                 // set the port (optional, assume standard SMTP port 25 if not provided)

@@ -10,6 +10,12 @@ use PDOException;
 use PDOStatement;
 use SimpleSAML\Logger;
 
+use function count;
+use function is_array;
+use function rand;
+use function sha1;
+use function serialize;
+
 /**
  * This file implements functions to read and write to a group of database servers.
  *
@@ -251,7 +257,7 @@ class Database
      *
      * @return int|false The number of rows affected by the query or false on error.
      */
-    public function write(string $stmt, array $params = [])
+    public function write(string $stmt, array $params = []): int|bool
     {
         return $this->query($this->dbPrimary, $stmt, $params)->rowCount();
     }

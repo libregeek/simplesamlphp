@@ -7,16 +7,16 @@ namespace SimpleSAML\Test\Metadata;
 use DOMDocument;
 use PHPUnit\Framework\TestCase;
 use RobRichards\XMLSecLibs\XMLSecurityDSig;
-use SAML2\DOMDocumentFactory;
-use SimpleSAML\XML\Signer;
 use SimpleSAML\Metadata\SAMLParser;
+use SimpleSAML\Test\SigningTestCase;
+use SimpleSAML\XML\{DOMDocumentFactory, Signer};
 
 /**
  * Test SAML parsing
  *
  * @covers \SimpleSAML\Metadata\SAMLParser
  */
-class SAMLParserTest extends \SimpleSAML\Test\SigningTestCase
+class SAMLParserTest extends SigningTestCase
 {
     /**
      * Test Registration Info is parsed
@@ -24,7 +24,7 @@ class SAMLParserTest extends \SimpleSAML\Test\SigningTestCase
     public function testRegistrationInfo(): void
     {
         $expected = [
-            'authority' => 'https://incommon.org',
+            'registrationAuthority' => 'https://incommon.org',
         ];
 
         $document = DOMDocumentFactory::fromString(
@@ -56,7 +56,7 @@ XML
     public function testRegistrationInfoInheritance(): void
     {
         $expected = [
-            'authority' => 'https://incommon.org',
+            'registrationAuthority' => 'https://incommon.org',
         ];
 
         $document = DOMDocumentFactory::fromString(
@@ -107,8 +107,8 @@ XML
     public function testRegistrationPolicy(): void
     {
         $expected = [
-            'authority' => 'https://safire.ac.za',
-            'policies' => [ 'en' => 'https://safire.ac.za/safire/policy/mrps/v20190207.html' ],
+            'registrationAuthority' => 'https://safire.ac.za',
+            'RegistrationPolicy' => [ 'en' => 'https://safire.ac.za/safire/policy/mrps/v20190207.html' ],
         ];
 
         $document = DOMDocumentFactory::fromString(
@@ -141,8 +141,8 @@ XML
     public function testRegistrationInstant(): void
     {
         $expected = [
-            'authority' => 'https://safire.ac.za',
-            'instant' => 1675861615,
+            'registrationAuthority' => 'https://safire.ac.za',
+            'registrationInstant' => '2023-02-08T13:06:55Z',
         ];
 
         $document = DOMDocumentFactory::fromString(
@@ -200,7 +200,6 @@ XML
 
         /** @var array $metadata */
         $metadata = $entities['theEntityID']->getMetadata20SP();
-
         $this->assertEquals("Example service", $metadata['name']['en']);
         $this->assertEquals("Dit is een voorbeeld voor de unittest.", $metadata['description']['nl']);
 
@@ -219,12 +218,9 @@ XML
     /**
      * @return \DOMDocument
      */
-    public function makeTestDocument(): \DOMDocument
+    public function makeTestDocument(): DOMDocument
     {
-        $doc = new DOMDocument();
-        $doc->loadXML(
-            <<<XML
-<?xml version="1.0"?>
+        $doc = DOMDocumentFactory::fromString(<<<XML
 <EntitiesDescriptor xmlns="urn:oasis:names:tc:SAML:2.0:metadata">
   <EntityDescriptor entityID="theEntityID">
     <SPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol"/>

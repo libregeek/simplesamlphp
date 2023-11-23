@@ -4,10 +4,15 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\saml\Auth\Process;
 
-use SAML2\Constants;
+use SimpleSAML\{Auth, Error};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth\ProcessingFilter;
-use SimpleSAML\Error;
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\SAML2\XML\saml\NameID;
+
+use function call_user_func;
+use function strpos;
+use function strval;
+use function substr;
 
 /**
  * Authentication processing filter to create an attribute from a NameID.
@@ -15,7 +20,7 @@ use SimpleSAML\Error;
  * @package SimpleSAMLphp
  */
 
-class NameIDAttribute extends ProcessingFilter
+class NameIDAttribute extends Auth\ProcessingFilter
 {
     /**
      * The attribute we should save the NameID in.
@@ -86,7 +91,7 @@ class NameIDAttribute extends ProcessingFilter
                     $ret[] = 'SPNameQualifier';
                     break;
                 case 'V':
-                    $ret[] = 'Value';
+                    $ret[] = 'Content';
                     break;
                 case '%':
                     $ret[] = '%';
@@ -118,18 +123,15 @@ class NameIDAttribute extends ProcessingFilter
         }
 
         $rep = $state['saml:sp:NameID'];
-        Assert::notNull($rep->getValue());
+        Assert::isInstanceOf($rep, NameID::class);
+        $arr = $rep->toArray();
 
-        if ($rep->getFormat() === null) {
-            $rep->setFormat(Constants::NAMEID_UNSPECIFIED);
-        }
+        $arr['Format'] = $arr['Format'] ?? C::NAMEID_UNSPECIFIED;
+        $arr['NameQualifier'] = $arr['NameQualifier'] ?? $state['Source']['entityid'];
+        $arr['SPNameQualifier'] = $arr['SPNameQualifier'] ?? $state['Destination']['entityid'];
 
-        if ($rep->getSPNameQualifier() === null) {
-            $rep->setSPNameQualifier($state['Source']['entityid']);
-        }
-        if ($rep->getNameQualifier() === null) {
-            $rep->setNameQualifier($state['Destination']['entityid']);
-        }
+        $rep = NameID::fromArray($arr);
+        $state['saml:sp:NameID'] = $rep;
 
         $value = '';
         $isString = true;

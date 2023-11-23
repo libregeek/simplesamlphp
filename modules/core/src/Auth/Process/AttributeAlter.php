@@ -4,9 +4,18 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Module\core\Auth\Process;
 
+use SimpleSAML\{Auth, Error};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Error;
+
+use function array_diff;
+use function array_key_exists;
+use function array_merge;
+use function array_values;
+use function is_int;
+use function is_string;
+use function preg_match;
+use function preg_replace;
+use function var_export;
 
 /**
  * Filter to modify attributes using regular expressions
@@ -37,9 +46,9 @@ class AttributeAlter extends Auth\ProcessingFilter
 
     /**
      * String to replace the pattern found with.
-     * @var string|false
+     * @var string|false|null
      */
-    private $replacement = false;
+    private string|bool|null $replacement = false;
 
     /**
      * Attribute to search in

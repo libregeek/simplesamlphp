@@ -6,10 +6,9 @@ namespace SimpleSAML;
 
 use Exception;
 use ParseError;
-use SAML2\Constants;
+use SimpleSAML\{Error, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Error;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Constants as C;
 use Symfony\Component\Filesystem\Filesystem;
 
 use function array_key_exists;
@@ -47,6 +46,24 @@ class Configuration implements Utils\ClearableState
      * @var string
      */
     public const REQUIRED_OPTION = '___REQUIRED_OPTION___';
+
+    /**
+     * The default security-headers to be sent on responses.
+     */
+    public const DEFAULT_SECURITY_HEADERS = [
+        'Content-Security-Policy' =>
+            "default-src 'none'; " .
+            "frame-ancestors 'self'; " .
+            "object-src 'none'; " .
+            "script-src 'self'; " .
+            "style-src 'self'; " .
+            "font-src 'self'; " .
+            "connect-src 'self'; " .
+            "img-src 'self' data:; " .
+            "base-uri 'none'",
+        'Referrer-Policy' => 'origin-when-cross-origin',
+        'X-Content-Type-Options' => 'nosniff',
+    ];
 
     /**
      * Associative array with mappings from instance-names to configuration objects.
@@ -374,7 +391,7 @@ class Configuration implements Utils\ClearableState
      *
      * @throws \SimpleSAML\Assert\AssertionFailedException If the required option cannot be retrieved.
      */
-    public function getValue(string $name)
+    public function getValue(string $name): mixed
     {
         Assert::true(
             $this->hasValue($name),
@@ -396,7 +413,7 @@ class Configuration implements Utils\ClearableState
      *
      * @throws \SimpleSAML\Assert\AssertionFailedException If the required option cannot be retrieved.
      */
-    public function getOptionalValue(string $name, $default)
+    public function getOptionalValue(string $name, mixed $default): mixed
     {
         // return the default value if the option is unset
         if (!$this->hasValue($name)) {
@@ -832,7 +849,7 @@ class Configuration implements Utils\ClearableState
      *
      * @throws \SimpleSAML\Assert\AssertionFailedException If the option does not have any of the allowed values.
      */
-    public function getValueValidate(string $name, array $allowedValues)
+    public function getValueValidate(string $name, array $allowedValues): mixed
     {
         $ret = $this->getValue($name);
 
@@ -867,7 +884,7 @@ class Configuration implements Utils\ClearableState
      *
      * @throws \SimpleSAML\Assert\AssertionFailedException If the option does not have any of the allowed values.
      */
-    public function getOptionalValueValidate(string $name, array $allowedValues, $default)
+    public function getOptionalValueValidate(string $name, array $allowedValues, mixed $default): mixed
     {
         $ret = $this->getOptionalValue($name, $default);
 
@@ -1136,11 +1153,11 @@ class Configuration implements Utils\ClearableState
             case 'saml20-idp-remote:SingleSignOnService':
             case 'saml20-idp-remote:SingleLogoutService':
             case 'saml20-sp-remote:SingleLogoutService':
-                return Constants::BINDING_HTTP_REDIRECT;
+                return C::BINDING_HTTP_REDIRECT;
             case 'saml20-sp-remote:AssertionConsumerService':
-                return Constants::BINDING_HTTP_POST;
+                return C::BINDING_HTTP_POST;
             case 'saml20-idp-remote:ArtifactResolutionService':
-                return Constants::BINDING_SOAP;
+                return C::BINDING_SOAP;
             default:
                 throw new Exception('Missing default binding for ' . $endpointType . ' in ' . $set);
         }
@@ -1238,8 +1255,8 @@ class Configuration implements Utils\ClearableState
     public function getEndpointPrioritizedByBinding(
         string $endpointType,
         array $bindings,
-        $default = self::REQUIRED_OPTION
-    ) {
+        mixed $default = self::REQUIRED_OPTION,
+    ): mixed {
         $endpoints = $this->getEndpoints($endpointType);
 
         foreach ($bindings as $binding) {
@@ -1271,8 +1288,11 @@ class Configuration implements Utils\ClearableState
      *
      * @throws \Exception If no supported endpoint is found and no $default parameter is specified.
      */
-    public function getDefaultEndpoint(string $endpointType, array $bindings = null, $default = self::REQUIRED_OPTION)
-    {
+    public function getDefaultEndpoint(
+        string $endpointType,
+        array $bindings = null,
+        mixed $default = self::REQUIRED_OPTION,
+    ): mixed {
         $endpoints = $this->getEndpoints($endpointType);
 
         $defaultEndpoint = Utils\Config\Metadata::getDefaultEndpoint($endpoints, $bindings);

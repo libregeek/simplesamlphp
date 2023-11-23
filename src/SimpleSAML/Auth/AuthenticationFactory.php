@@ -4,29 +4,21 @@ declare(strict_types=1);
 
 namespace SimpleSAML\Auth;
 
-use SimpleSAML\Configuration;
-use SimpleSAML\Session;
+use SimpleSAML\{Configuration, Session};
 
 /**
  * Factory class to get instances of \SimpleSAML\Auth\Simple for a given authentication source.
  */
 class AuthenticationFactory
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
-    /** @var \SimpleSAML\Session */
-    protected Session $session;
-
-
     /**
      * @param \SimpleSAML\Configuration $config
      * @param \SimpleSAML\Session $session
      */
-    public function __construct(Configuration $config, Session $session)
-    {
-        $this->config = $config;
-        $this->session = $session;
+    public function __construct(
+        protected Configuration $config,
+        protected Session $session
+    ) {
     }
 
 

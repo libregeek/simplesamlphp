@@ -6,11 +6,9 @@ namespace SimpleSAML\XHTML;
 
 use Exception;
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Configuration;
-use SimpleSAML\Logger;
+use SimpleSAML\{Configuration, Logger, Session, Utils};
 use SimpleSAML\Metadata\MetaDataStorageHandler;
-use SimpleSAML\Session;
-use SimpleSAML\Utils;
+use Symfony\Component\HttpFoundation\{Request, Response};
 
 use function array_fill_keys;
 use function array_intersect_key;
@@ -44,13 +42,6 @@ class IdPDisco
     protected Configuration $config;
 
     /**
-     * The identifier of this discovery service.
-     *
-     * @var string
-     */
-    protected string $instance;
-
-    /**
      * An instance of the metadata handler, which will allow us to fetch metadata about IdPs.
      *
      * @var \SimpleSAML\Metadata\MetaDataStorageHandler
@@ -63,13 +54,6 @@ class IdPDisco
      * @var \SimpleSAML\Session
      */
     protected Session $session;
-
-    /**
-     * The metadata sets we find allowed entities in, in prioritized order.
-     *
-     * @var array
-     */
-    protected array $metadataSets;
 
     /**
      * The entity id of the SP which accesses this IdP discovery service.
@@ -117,64 +101,69 @@ class IdPDisco
      */
     protected string $returnURL;
 
-
     /**
      * Initializes this discovery service.
      *
      * The constructor does the parsing of the request. If this is an invalid request, it will throw an exception.
      *
-     * @param string[] $metadataSets Array with metadata sets we find remote entities in.
+     * @param string[] $metadataSets Array with metadata sets we find remote entities in, in prioritized order.
      * @param string $instance The name of this instance of the discovery service.
      *
      * @throws \Exception If the request is invalid.
      */
-    public function __construct(array $metadataSets, string $instance)
-    {
+    public function __construct(
+        protected Request $request,
+        protected array $metadataSets,
+        protected string $instance
+    ) {
         // initialize standard classes
+        $this->request = $request;
         $this->config = Configuration::getInstance();
-        $this->metadata = MetaDataStorageHandler::getMetadataHandler();
+        $this->metadata = MetaDataStorageHandler::getMetadataHandler($this->config);
         $this->session = Session::getSessionFromRequest();
-        $this->instance = $instance;
-        $this->metadataSets = $metadataSets;
 
         $this->log('Accessing discovery service.');
 
         // standard discovery service parameters
-        if (!array_key_exists('entityID', $_GET)) {
+        if (!$request->query->has('entityID')) {
             throw new Exception('Missing parameter: entityID');
-        } else {
-            $this->spEntityId = $_GET['entityID'];
         }
+        $this->spEntityId = $request->query->get('entityID');
 
-        if (!array_key_exists('returnIDParam', $_GET)) {
+        if (!$request->query->has('returnIDParam')) {
             $this->returnIdParam = 'entityID';
         } else {
-            $this->returnIdParam = $_GET['returnIDParam'];
+            $this->returnIdParam = $request->query->get('returnIDParam');
         }
 
         $this->log('returnIdParam initially set to [' . $this->returnIdParam . ']');
 
-        if (!array_key_exists('return', $_GET)) {
+        if (!$request->query->has('return')) {
             throw new Exception('Missing parameter: return');
         } else {
             $httpUtils = new Utils\HTTP();
-            $this->returnURL = $httpUtils->checkURLAllowed($_GET['return']);
+            $this->returnURL = $httpUtils->checkURLAllowed($request->query->get('return'));
         }
 
         $this->isPassive = false;
-        if (array_key_exists('isPassive', $_GET)) {
-            if ($_GET['isPassive'] === 'true') {
+        if ($request->query->has('isPassive')) {
+            if ($request->query->get('isPassive') === 'true') {
                 $this->isPassive = true;
             }
         }
         $this->log('isPassive initially set to [' . ($this->isPassive ? 'TRUE' : 'FALSE') . ']');
 
-        if (array_key_exists('IdPentityID', $_GET)) {
-            $this->setIdPentityID = $_GET['IdPentityID'];
+        if ($request->query->has('IdPentityID')) {
+            $this->setIdPentityID = $request->query->get('IdPentityID');
         }
 
-        if (array_key_exists('IDPList', $_REQUEST)) {
-            $this->scopedIDPList = $_REQUEST['IDPList'];
+        if ($request->query->has('IDPList')) {
+            $this->scopedIDPList = $request->query->filter(
+                'IDPList',
+                [],
+                \FILTER_DEFAULT,
+                ['flags' => \FILTER_REQUIRE_ARRAY],
+            );
         }
     }
 
@@ -206,8 +195,8 @@ class IdPDisco
     protected function getCookie(string $name): ?string
     {
         $prefixedName = 'idpdisco_' . $this->instance . '_' . $name;
-        if (array_key_exists($prefixedName, $_COOKIE)) {
-            return $_COOKIE[$prefixedName];
+        if ($this->request->cookies->has($prefixedName)) {
+            return $this->request->cookies->get($prefixedName);
         } else {
             return null;
         }
@@ -293,8 +282,8 @@ class IdPDisco
         }
 
         // user has clicked on a link, or selected the IdP from a drop-down list
-        if (array_key_exists('idpentityid', $_GET)) {
-            return $this->validateIdP($_GET['idpentityid']);
+        if ($this->request->query->has('idpentityid')) {
+            return $this->validateIdP($this->request->query->get('idpentityid'));
         }
 
         /* Search for the IdP selection from the form used by the links view. This form uses a name which equals
@@ -303,7 +292,7 @@ class IdPDisco
          * Unfortunately, php replaces periods in the name with underscores, and there is no reliable way to get them
          * back. Therefore we do some quick and dirty parsing of the query string.
          */
-        $qstr = $_SERVER['QUERY_STRING'];
+        $qstr = $this->request->server->get('QUERY_STRING');
         $matches = [];
         if (preg_match('/(?:^|&)idp_([^=]+)=/', $qstr, $matches)) {
             return $this->validateIdP(urldecode($matches[1]));
@@ -359,7 +348,11 @@ class IdPDisco
     protected function getFromCIDRhint(): ?string
     {
         foreach ($this->metadataSets as $metadataSet) {
-            $idp = $this->metadata->getPreferredEntityIdFromCIDRhint($metadataSet, $_SERVER['REMOTE_ADDR']);
+            $idp = $this->metadata->getPreferredEntityIdFromCIDRhint(
+                $metadataSet,
+                $this->request->server->get('REMOTE_ADDR')
+            );
+
             if (!empty($idp)) {
                 return $idp;
             }
@@ -420,7 +413,7 @@ class IdPDisco
             return false;
         }
 
-        if (array_key_exists('remember', $_GET)) {
+        if ($this->request->request->has('remember')) {
             return true;
         }
 
@@ -519,17 +512,17 @@ class IdPDisco
 
     /**
      * Check if an IdP is set or if the request is passive, and redirect accordingly.
-     *
      */
-    protected function start(): void
+    protected function start(): ?Response
     {
         $httpUtils = new Utils\HTTP();
         $idp = $this->getTargetIdP();
+
         if ($idp !== null) {
             $extDiscoveryStorage = $this->config->getOptionalString('idpdisco.extDiscoveryStorage', null);
             if ($extDiscoveryStorage !== null) {
                 $this->log('Choice made [' . $idp . '] (Forwarding to external discovery storage)');
-                $httpUtils->redirectTrustedURL($extDiscoveryStorage, [
+                return $httpUtils->redirectTrustedURL($extDiscoveryStorage, [
                     'entityID'      => $this->spEntityId,
                     'IdPentityID'   => $idp,
                     'returnIDParam' => $this->returnIdParam,
@@ -541,14 +534,16 @@ class IdPDisco
                     'Choice made [' . $idp . '] (Redirecting the user back. returnIDParam='
                     . $this->returnIdParam . ')'
                 );
-                $httpUtils->redirectTrustedURL($this->returnURL, [$this->returnIdParam => $idp]);
+                return $httpUtils->redirectTrustedURL($this->returnURL, [$this->returnIdParam => $idp]);
             }
         }
 
         if ($this->isPassive) {
             $this->log('Choice not made. (Redirecting the user back without answer)');
-            $httpUtils->redirectTrustedURL($this->returnURL);
+            return $httpUtils->redirectTrustedURL($this->returnURL);
         }
+
+        return null;
     }
 
 
@@ -557,9 +552,12 @@ class IdPDisco
      *
      * The IdP disco parameters should be set before calling this function.
      */
-    public function handleRequest(): void
+    public function handleRequest(): Response
     {
-        $this->start();
+        $response = $this->start();
+        if ($response !== null) {
+            return $response;
+        }
 
         // no choice made. Show discovery service page
         $idpList = $this->getIdPList();
@@ -579,7 +577,8 @@ class IdPDisco
                 'Choice made [' . $idpintersection[0] . '] (Redirecting the user back. returnIDParam=' .
                 $this->returnIdParam . ')'
             );
-            $httpUtils->redirectTrustedURL(
+
+            return $httpUtils->redirectTrustedURL(
                 $this->returnURL,
                 [$this->returnIdParam => $idpintersection[0]]
             );
@@ -633,6 +632,7 @@ class IdPDisco
         $t->data['urlpattern'] = $httpUtils->getSelfURLNoQuery();
         $t->data['rememberenabled'] = $this->config->getOptionalBoolean('idpdisco.enableremember', false);
         $t->data['rememberchecked'] = $this->config->getOptionalBoolean('idpdisco.rememberchecked', false);
-        $t->send();
+
+        return $t;
     }
 }

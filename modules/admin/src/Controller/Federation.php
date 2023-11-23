@@ -5,25 +5,30 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\admin\Controller;
 
 use Exception;
-use SAML2\Constants as C;
-use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Configuration;
+use SimpleSAML\{Auth, Configuration, Logger, Module, Utils};
+use SimpleSAML\Assert\{Assert, AssertionFailedException};
 use SimpleSAML\Locale\Translate;
-use SimpleSAML\Logger;
-use SimpleSAML\Metadata\MetaDataStorageHandler;
-use SimpleSAML\Metadata\SAMLBuilder;
-use SimpleSAML\Metadata\SAMLParser;
-use SimpleSAML\Metadata\Signer;
-use SimpleSAML\Module;
+use SimpleSAML\Metadata\{MetaDataStorageHandler, SAMLBuilder, SAMLParser, Signer};
 use SimpleSAML\Module\adfs\IdP\ADFS as ADFS_IdP;
 use SimpleSAML\Module\saml\IdP\SAML2 as SAML2_IdP;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\SAML2\Exception\ArrayValidationException;
+use SimpleSAML\SAML2\XML\md\ContactPerson;
 use SimpleSAML\XHTML\Template;
-use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpFoundation\ResponseHeaderBag;
+use Symfony\Component\HttpFoundation\{Request, Response, ResponseHeaderBag};
 use Symfony\Component\VarExporter\VarExporter;
+
+use function array_merge;
+use function array_pop;
+use function array_values;
+use function count;
+use function file_get_contents;
+use function is_array;
+use function sprintf;
+use function str_replace;
+use function trim;
+use function urlencode;
+use function var_export;
 
 /**
  * Controller class for the admin module.
@@ -34,9 +39,6 @@ use Symfony\Component\VarExporter\VarExporter;
  */
 class Federation
 {
-    /** @var \SimpleSAML\Configuration */
-    protected Configuration $config;
-
     /**
      * @var \SimpleSAML\Auth\Source|string
      * @psalm-var \SimpleSAML\Auth\Source|class-string
@@ -61,11 +63,11 @@ class Federation
      *
      * @param \SimpleSAML\Configuration $config The configuration to use.
      */
-    public function __construct(Configuration $config)
-    {
-        $this->config = $config;
+    public function __construct(
+        protected Configuration $config
+    ) {
         $this->menu = new Menu();
-        $this->mdHandler = MetaDataStorageHandler::getMetadataHandler();
+        $this->mdHandler = MetaDataStorageHandler::getMetadataHandler($config);
         $this->authUtils = new Utils\Auth();
         $this->cryptoUtils = new Utils\Crypto();
     }
@@ -108,13 +110,16 @@ class Federation
      * Display the federation page.
      *
      * @param \Symfony\Component\HttpFoundation\Request $request
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      * @throws \SimpleSAML\Error\Exception
      * @throws \SimpleSAML\Error\Exception
      */
-    public function main(/** @scrutinizer ignore-unused */ Request $request): Template
+    public function main(/** @scrutinizer ignore-unused */ Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         // initialize basic metadata array
         $hostedSPs = $this->getHostedSP();
@@ -198,10 +203,10 @@ class Federation
                 $httpUtils = new Utils\HTTP();
                 $metadataBase = Module::getModuleURL('saml/idp/metadata');
                 if (count($idps) > 1) {
-                    $selfHost = $httpUtils->getSelfHost();
+                    $selfHost = $httpUtils->getSelfHostWithPath();
                     foreach ($idps as $index => $idp) {
                         if (isset($idp['host']) && $idp['host'] !== '__DEFAULT__') {
-                            $mdHostBase = str_replace('://' . $selfHost, '://' . $idp['host'], $metadataBase);
+                            $mdHostBase = str_replace('://' . $selfHost . '/', '://' . $idp['host'] . '/', $metadataBase);
                         } else {
                             $mdHostBase = $metadataBase;
                         }
@@ -277,8 +282,14 @@ class Federation
                     $builder->addSecurityTokenServiceType($entity['metadata_array']);
                     $builder->addOrganizationInfo($entity['metadata_array']);
                     if (isset($entity['metadata_array']['contacts'])) {
-                        foreach ($entity['metadata_array']['contacts'] as $contact) {
-                            $builder->addContact(Utils\Config\Metadata::getContact($contact));
+                        foreach ($entity['metadata_array']['contacts'] as $c) {
+                            try {
+                                $contact = ContactPerson::fromArray($c);
+                            } catch (ArrayValidationException $e) {
+                                Logger::warning('Federation: invalid content found in contact: ' . $e->getMessage());
+                                continue;
+                            }
+                            $builder->addContact($contact);
                         }
                     }
 
@@ -355,7 +366,6 @@ class Federation
             $xml = $builder->getEntityDescriptorText(true);
 
             // sanitize the resulting array
-            unset($metadata['UIInfo']);
             unset($metadata['metadata-set']);
             unset($metadata['entityid']);
 
@@ -388,11 +398,15 @@ class Federation
      *
      * @param \Symfony\Component\HttpFoundation\Request $request The current request.
      *
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function metadataConverter(Request $request): Template
+    public function metadataConverter(Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
+
         if ($xmlfile = $request->files->get('xmlfile')) {
             $xmldata = trim(file_get_contents($xmlfile->getPathname()));
         } elseif ($xmldata = $request->request->get('xmldata')) {
@@ -479,7 +493,10 @@ class Federation
      */
     public function downloadCert(Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         $set = $request->query->get('set');
         $prefix = $request->query->get('prefix', '');
@@ -518,11 +535,14 @@ class Federation
      *
      * @param \Symfony\Component\HttpFoundation\Request $request The current request.
      *
-     * @return \SimpleSAML\XHTML\Template
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function showRemoteEntity(Request $request): Template
+    public function showRemoteEntity(Request $request): Response
     {
-        $this->authUtils->requireAdmin();
+        $response = $this->authUtils->requireAdmin();
+        if ($response instanceof Response) {
+            return $response;
+        }
 
         $entityId = $request->query->get('entityid');
         $set = $request->query->get('set');

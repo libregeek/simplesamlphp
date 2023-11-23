@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace SimpleSAML\Module\core\Auth\Process;
 
 use Exception;
-use SAML2\Constants;
-use SAML2\XML\saml\NameID;
+use SimpleSAML\{Auth, Logger, Utils};
 use SimpleSAML\Assert\Assert;
-use SimpleSAML\Auth;
-use SimpleSAML\Logger;
-use SimpleSAML\Utils;
+use SimpleSAML\SAML2\Constants as C;
+use SimpleSAML\SAML2\XML\saml\NameID;
+
+use function array_key_exists;
+use function hash;
+use function is_bool;
+use function sprintf;
+use function strlen;
 
 /**
  * Filter to generate the eduPersonTargetedID attribute.
@@ -50,7 +54,7 @@ class TargetedID extends Auth\ProcessingFilter
     /**
      * @var \SimpleSAML\Utils\Config
      */
-    protected $configUtils;
+    protected Utils\Config $configUtils;
 
 
     /**
@@ -72,10 +76,10 @@ class TargetedID extends Auth\ProcessingFilter
         $this->identifyingAttribute = $config['identifyingAttribute'];
 
         if (array_key_exists('nameId', $config)) {
-            $this->generateNameId = $config['nameId'];
-            if (!is_bool($this->generateNameId)) {
+            if (!is_bool($config['nameId'])) {
                 throw new Exception('Invalid value of \'nameId\'-option to core:TargetedID filter.');
             }
+            $this->generateNameId = $config['nameId'];
         }
 
         $this->configUtils = new Utils\Config();
@@ -138,16 +142,12 @@ class TargetedID extends Auth\ProcessingFilter
 
         if ($this->generateNameId) {
             // Convert the targeted ID to a SAML 2.0 name identifier element
-            $nameId = new NameID();
-            $nameId->setValue($uid);
-            $nameId->setFormat(Constants::NAMEID_PERSISTENT);
-
-            if (isset($state['Source']['entityid'])) {
-                $nameId->setNameQualifier($state['Source']['entityid']);
-            }
-            if (isset($state['Destination']['entityid'])) {
-                $nameId->setSPNameQualifier($state['Destination']['entityid']);
-            }
+            $nameId = new NameID(
+                value: $uid,
+                Format: C::NAMEID_PERSISTENT,
+                NameQualifier: $state['Source']['entityid'] ?? null,
+                SPNameQualifier: $state['Destination']['entityid'] ?? null,
+            );
         } else {
             $nameId = $uid;
         }
